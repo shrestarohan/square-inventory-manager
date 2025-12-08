@@ -1,0 +1,234 @@
+/* Base layout */
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  padding: 16px;
+  background: #fafafa;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+/* Top bar & rows */
+.top-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.top-row-main {
+  margin-bottom: 0.25rem;
+}
+
+.top-row-nav {
+  border-bottom: 1px solid #eee;
+  padding-bottom: 0.25rem;
+}
+
+.top-row-filters {
+  margin-top: 0.25rem;
+}
+
+/* Nav links */
+.main-nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.nav-link {
+  text-decoration: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.95rem;
+  border: 1px solid transparent;
+}
+
+.nav-link:hover {
+  background: #f5f5f5;
+}
+
+.nav-link.active {
+  border-color: #007bff;
+  background: #e7f0ff;
+  font-weight: 600;
+}
+
+/* User section */
+.nav-user {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.logout-form {
+  margin: 0;
+}
+
+/* Filters / controls */
+.nav-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+}
+
+.nav-block label {
+  font-size: 13px;
+  margin-right: 4px;
+}
+
+label {
+  font-size: 13px;
+}
+
+select {
+  padding: 4px 6px;
+  font-size: 13px;
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filters input {
+  width: 360px;
+  padding: 4px 6px;
+  font-size: 13px;
+}
+
+/* Table styles */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+th,
+td {
+  border: 1px solid #ddd;
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background-color: #f5f5f5;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+th.sortable:hover {
+  background-color: #e8f1ff;
+}
+
+th.sorted-asc::after {
+  content: " ▲";
+  font-size: 10px;
+}
+
+th.sorted-desc::after {
+  content: " ▼";
+  font-size: 10px;
+}
+
+tbody tr:nth-child(even) {
+  background-color: #fbfbfb;
+}
+
+tbody tr:hover {
+  background-color: #f0f7ff;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.pagination button {
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pagination select {
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+.pagination span {
+  white-space: nowrap;
+}
+
+/* Footer */
+.footer {
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px solid #ddd;
+  font-size: 11px;
+  color: #666;
+  text-align: right;
+}
+
+/* Inputs for inline editing */
+.price-input {
+  width: 80px;
+  font-size: 11px;
+  padding: 2px 4px;
+  box-sizing: border-box;
+}
+
+.price-input.price-updated {
+  background-color: #e0ffe0;
+}
+
+.price-input.price-error {
+  background-color: #ffe0e0;
+}
+
+.name-input {
+  width: 220px;
+  font-size: 11px;
+  padding: 2px 4px;
+  box-sizing: border-box;
+}
+
+.name-input.name-updated {
+  background-color: #e0ffe0;
+}
+
+.name-input.name-error {
+  background-color: #ffe0e0;
+}
+
+/* Extra styles for mismatch highlighting and hint text */
+.hint {
+  margin: 12px 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.mismatch-row {
+  background-color: rgba(220, 38, 38, 0.12); /* light red tint */
+}
+
+.mismatch-row input {
+  background-color: rgba(220, 38, 38, 0.18);
+}

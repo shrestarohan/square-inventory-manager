@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Price Mismatch Dashboard</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <%- include('partials/header', {
+        pageTitle: 'GTIN Master Inventory',
+        currentView: 'gtin',
+        merchant: null,
+        merchantId: null,
+        merchants: typeof merchants !== 'undefined' ? merchants : []
+      }) %>
+
+  <h1>Price Mismatch Dashboard</h1>
+  <p class="hint">
+    Rows highlighted in red have different prices across Amigo Liquor, Once Upon A Bottle, and Liquor Island.
+  </p>
+
+  <table id="inventory-table">
+    <thead>
+      <tr id="header-row">
+        <th class="sortable" data-key="gtin" data-type="string">GTIN</th>
+        <th class="sortable" data-key="item_name" data-type="string">Item</th>
+        <th class="sortable" data-key="category_name" data-type="string">Category</th>
+        <th class="sortable" data-key="sku" data-type="string">SKU</th>
+        <!-- Location price columns added by JS -->
+      </tr>
+    </thead>
+    <tbody id="inventory-body">
+      <!-- Rows rendered by JS -->
+    </tbody>
+  </table>
+
+  <div class="pagination">
+    <span id="page-info"></span>
+    <span>
+      Rows per page:
+      <select id="rowsPerPage">
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="250">250</option>
+      </select>
+    </span>
+    <button id="prevPage">&laquo; Prev</button>
+    <button id="nextPage">Next &raquo;</button>
+  </div>
+
+  <%- include('partials/footer') %>
+
+  <script>
+    // View selector (header)
+    const viewSelect = document.getElementById('viewSelect');
+    if (viewSelect) {
+      viewSelect.addEventListener('change', () => {
+        const val = viewSelect.value;
+        if (val) {
+          window.location.href = val;
+        }
+      });
+    }
+
+    const rawRows = <%- JSON.stringify(rows || []) %>;
+    const locationKeys = <%- JSON.stringify(locations || []) %>;
+
+    let allRows = rawRows.map((r, idx) => ({
+      _index: idx,
+      gtin: r.gtin || '',
+      item_name: r.item_name || '',
+      category_name: r.category_name || '',
+      sku: r.sku || '',
+      // {locKey: {price, currency, merchant_id, location_id, variation_id}}
+      pricesByLocation: r.pricesByLocation || {},
+    }));
+
+    let filteredRows = [...allRows];
+
+    let currentSort = {
+      key: null,
+      direction: 'asc',
+    };
+
+    let currentPage = 1;
+    let rowsPerPage = 50;
+
+    const headerRow = document.getElementById('header-row');
+    const tbody = document.getElementById('inventory-body');
+    const pageInfo = document.getElementById('page-info');
+    const rowsPerPageSelect = document.getElementById('rowsPerPage');
+    const prevBtn = document.getElementById('prevPage');
+    const nextBtn = document.getElementById('nextPage');
+    const searchInput = document.getElementById('search');
+
+    // ---------- Build dynamic header columns (location prices) ----------
+
+    locationKeys.forEach(locKey => {
+      const th = document.createElement('th');
+      th.textContent = locKey + ' (Price)';
+      headerRow.appendChild(th);
+    });
+
+    function getHeaderCells() {
+      return Array.from(
+        document.querySelectorAll('#inventory-table thead th.sortable')
+      );
+    }
+
+    // ---------- Rendering ----------
+
+    function renderTable() {
+      tbody.innerHTML = '';
+
+      const total = filteredRows.length;
+      if (total === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 4 + locationKeys.length;
+        td.textContent = 'No GTIN rows found.';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        pageInfo.textContent = '0 of 0';
+        prevBtn.disabled = true;
+        nextBtn.disabled = true;
+        return;
+      }
+
+      const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
+      if (currentPage > totalPages) currentPage = totalPages;
+      const startIndex = (currentPage - 1) * rowsPerPage;
+      const endIndex = Math.min(startIndex + rowsPerPage, total);
+
+      for (let i = startIndex; i < endIndex; i++) {
+        const r = filteredRows[i];
+
+        // --- NEW: detect price mismatch across locations ---
+        const priceValues = [];
+        locationKeys.forEach(locKey => {
+          const info = r.pricesByLocation[locKey];
+          if (info && typeof info.price === 'number') {
+            priceValues.push(info.price);
+          }
+        });
+
+        let isMismatch = false;
+        if (priceValues.length > 1) {
+          const first = priceValues[0];
+          isMismatch = priceValues.some(p => p !== first);
+        }
+        // ---------------------------------------------------
+
+        const tr = document.createElement('tr');
+        if (isMismatch) {
+          tr.classList.add('mismatch-row');
+        }
+
+        // GTIN cell
+        const tdGtin = document.createElement('td');
+        tdGtin.textContent = r.gtin;
+        tr.appendChild(tdGtin);
+
+        // Item name (editable master)
+        const tdName = document.createElement('td');
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'name-input';
+        nameInput.value = r.item_name || '';
+        nameInput.dataset.gtin = r.gtin || '';
+        nameInput.addEventListener('change', handleNameChange);
+        tdName.appendChild(nameInput);
+        tr.appendChild(tdName);
+
+        // Category cell
+        const tdCat = document.createElement('td');
+        tdCat.textContent = r.category_name || '';
+        tr.appendChild(tdCat);
+
+        // SKU cell
+        const tdSku = document.createElement('td');
+        tdSku.textContent = r.sku || '';
+        tr.appendChild(tdSku);
+
+
+        // Price cells for each location (editable)
+        locationKeys.forEach(locKey => {
+          const td = document.createElement('td');
+          const info = r.pricesByLocation[locKey];
+
+          if (info) {
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.step = '0.01';
+            input.className = 'price-input';
+
+            if (info.price != null) {
+              input.value = info.price.toFixed(2);
+            }
+
+            // Attach metadata for the API call
+            input.dataset.locationKey = locKey;
+            input.dataset.merchantId = info.merchant_id || '';
+            input.dataset.locationId = info.location_id || '';
+            input.dataset.variationId = info.variation_id || '';
+            input.dataset.currency = info.currency || 'USD';
+
+            // When user changes price
+            input.addEventListener('change', handlePriceChange);
+
+            td.appendChild(input);
+          } else {
+            td.textContent = '';
+          }
+
+          tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
+      }
+
+      pageInfo.textContent = `Page ${currentPage} of ${Math.max(
+        1,
+        Math.ceil(total / rowsPerPage)
+      )}  (Total rows: ${total})`;
+
+      prevBtn.disabled = currentPage <= 1;
+      nextBtn.disabled = currentPage >= Math.ceil(total / rowsPerPage);
+    }
+
+    // ---------- Sorting ----------
+
+    function clearSortIndicators() {
+      getHeaderCells().forEach(th => {
+        th.classList.remove('sorted-asc', 'sorted-desc');
+      });
+    }
+
+    function sortBy(key, type) {
+      if (!key) return;
+
+      if (currentSort.key === key) {
+        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        currentSort.key = key;
+        currentSort.direction = 'asc';
+      }
+
+      const dir = currentSort.direction === 'asc' ? 1 : -1;
+
+      filteredRows.sort((a, b) => {
+        const va = a[key];
+        const vb = b[key];
+
+        if (type === 'number') {
+          const na = (va === null || va === undefined || isNaN(va)) ? 0 : Number(va);
+          const nb = (vb === null || vb === undefined || isNaN(vb)) ? 0 : Number(vb);
+          if (na < nb) return -1 * dir;
+          if (na > nb) return 1 * dir;
+          return 0;
+        } else {
+          const sa = (va || '').toString().toLowerCase();
+          const sb = (vb || '').toString().toLowerCase();
+          if (sa < sb) return -1 * dir;
+          if (sa > sb) return 1 * dir;
+          return 0;
+        }
+      });
+
+      clearSortIndicators();
+      getHeaderCells().forEach(th => {
+        if (th.dataset.key === key) {
+          th.classList.add(
+            currentSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc'
+          );
+        }
+      });
+
+      currentPage = 1;
+      renderTable();
+    }
+
+    getHeaderCells().forEach(th => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.key;
+        const type = th.dataset.type || 'string';
+        sortBy(key, type);
+      });
+    });
+
+    // ---------- Search ----------
+
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.trim().toLowerCase();
+      if (!q) {
+        filteredRows = [...allRows];
+      } else {
+        filteredRows = allRows.filter(r => {
+          const baseTextParts = [
+            r.gtin,
+            r.item_name,
+            r.category_name,
+            r.sku,
+          ];
+
+          const priceTextParts = locationKeys.map(locKey => {
+            const info = r.pricesByLocation[locKey];
+            if (!info || info.price == null) return '';
+            return locKey + ' ' + info.price + ' ' + (info.currency || '');
+          });
+
+          return baseTextParts.concat(priceTextParts)
+            .join(' ')
+            .toLowerCase()
+            .includes(q);
+        });
+      }
+      currentPage = 1;
+      renderTable();
+    });
+
+    // ---------- Pagination controls ----------
+
+    rowsPerPageSelect.addEventListener('change', () => {
+      rowsPerPage = Number(rowsPerPageSelect.value) || 50;
+      currentPage = 1;
+      renderTable();
+    });
+
+    prevBtn.addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        renderTable();
+      }
+    });
+
+    nextBtn.addEventListener('click', () => {
+      const total = filteredRows.length;
+      const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
+      if (currentPage < totalPages) {
+        currentPage++;
+        renderTable();
+      }
+    });
+
+    // ---------- Price change handler ----------
+
+    async function handlePriceChange(event) {
+      const input = event.target;
+      const newValue = input.value.trim();
+
+      const merchantId = input.dataset.merchantId;
+      const variationId = input.dataset.variationId;
+      const currency = input.dataset.currency || 'USD';
+
+      if (!merchantId || !variationId) {
+        alert('Missing merchant or variation information for this price.');
+        return;
+      }
+
+      if (!newValue) {
+        alert('Price cannot be empty.');
+        return;
+      }
+
+      const numericPrice = Number(newValue);
+      if (Number.isNaN(numericPrice) || numericPrice < 0) {
+        alert('Enter a valid non-negative price.');
+        input.classList.add('price-error');
+        return;
+      }
+
+      input.disabled = true;
+      input.classList.remove('price-error');
+
+      try {
+        const res = await fetch('/api/update-price', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            merchantId,
+            variationId,
+            price: numericPrice,
+            currency,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to update price in Square');
+        }
+
+        input.classList.add('price-updated');
+        setTimeout(() => input.classList.remove('price-updated'), 800);
+      } catch (err) {
+        console.error(err);
+        alert('Failed to update price: ' + err.message);
+        input.classList.add('price-error');
+      } finally {
+        input.disabled = false;
+      }
+    }
+
+    async function handleNameChange(event) {
+      const input = event.target;
+      const newName = input.value.trim();
+      const gtin = input.dataset.gtin;
+
+      if (!gtin) {
+        alert('Missing GTIN for this row.');
+        return;
+      }
+
+      if (!newName) {
+        alert('Item name cannot be empty.');
+        input.classList.add('name-error');
+        return;
+      }
+
+      input.disabled = true;
+      input.classList.remove('name-error');
+
+      try {
+        const res = await fetch('/api/update-item-name', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            gtin,
+            itemName: newName,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to update item name');
+        }
+
+        // Update local data model so search/sort show the new name everywhere
+        allRows.forEach(r => {
+          if (r.gtin === gtin) {
+            r.item_name = newName;
+          }
+        });
+        filteredRows.forEach(r => {
+          if (r.gtin === gtin) {
+            r.item_name = newName;
+          }
+        });
+
+        input.classList.add('name-updated');
+        setTimeout(() => input.classList.remove('name-updated'), 800);
+      } catch (err) {
+        console.error(err);
+        alert('Failed to update item name: ' + err.message);
+        input.classList.add('name-error');
+      } finally {
+        input.disabled = false;
+      }
+    }
+
+    // ---------- Initial render ----------
+
+    renderTable();
+  </script>
+</body>
+</html>

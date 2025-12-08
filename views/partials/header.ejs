@@ -1,0 +1,104 @@
+<div class="top-bar">
+  <!-- Row 1: Title (left) + User/Logout (right) -->
+  <div class="top-row top-row-main">
+    <div class="nav-title">
+      <h1>
+        <%= pageTitle || 'Inventory Dashboard' %>
+        <% if (currentView === 'item' && merchant && merchant.business_name) { %>
+          – <%= merchant.business_name %>
+        <% } else if (currentView === 'item') { %>
+          – All Merchants
+        <% } else if (currentView === 'gtin') { %>
+          – GTIN Master
+        <% } %>
+      </h1>
+    </div>
+
+    <div class="nav-user">
+      <% if (user) { %>
+        <span class="user-info">
+          Logged in as <strong><%= user.email %></strong>
+        </span>
+        <form action="/logout" method="POST" class="logout-form">
+          <button type="submit" class="btn btn-sm btn-outline-danger">
+            Logout
+          </button>
+        </form>
+      <% } else { %>
+        <a href="/auth/google" class="btn btn-sm btn-primary">
+          Login with Google
+        </a>
+      <% } %>
+    </div>
+  </div>
+
+  <!-- Row 2: Main navigation (pages) -->
+  <div class="top-row top-row-nav">
+    <nav class="main-nav">
+      <a
+        href="/dashboard"
+        class="nav-link <%= activePage === 'dashboard' ? 'active' : '' %>"
+      >
+        Dashboard
+      </a>
+
+      <a
+        href="/reports"
+        class="nav-link <%= activePage === 'reports' ? 'active' : '' %>"
+      >
+        Reports
+      </a>
+
+      <a
+        href="/dashboard-gtin"
+        class="nav-link <%= activePage === 'dashboard_gtin' ? 'active' : '' %>"
+      >
+        Dashboard Price Mismatch
+      </a>
+    </nav>
+  </div>
+
+  <!-- Row 3: Filters (merchant + view + search) -->
+  <div class="top-row top-row-filters">
+    <div class="nav-left">
+      <% if (currentView === 'item') { %>
+        <div class="nav-block">
+          <label for="merchantSelect"><strong>Merchant:</strong></label>
+          <select id="merchantSelect">
+            <option value="/dashboard" <%= !merchantId ? 'selected' : '' %>>
+              All Merchants (Master)
+            </option>
+            <% if (merchants && merchants.length) { %>
+              <% merchants.forEach(m => { %>
+                <option
+                  value="/dashboard/<%= m.id %>"
+                  <%= merchantId === m.id ? 'selected' : '' %>>
+                  <%= m.business_name || m.id %>
+                </option>
+              <% }) %>
+            <% } %>
+          </select>
+        </div>
+      <% } %>
+
+      <div class="nav-block">
+        <label for="viewSelect"><strong>View:</strong></label>
+        <select id="viewSelect">
+          <option value="/dashboard" <%= currentView === 'item' ? 'selected' : '' %>>
+            Per Item / Per Merchant
+          </option>
+          <option value="/dashboard-gtin" <%= currentView === 'gtin' ? 'selected' : '' %>>
+            GTIN Master (Price by Location)
+          </option>
+        </select>
+      </div>
+    </div>
+
+    <div class="filters">
+      <input
+        id="search"
+        placeholder="Search by item, SKU, GTIN, merchant, location, category..."
+      />
+    </div>
+  </div>
+</div>

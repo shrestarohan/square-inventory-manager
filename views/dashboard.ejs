@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Inventory Dashboard</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <%- include('partials/header', {
+        pageTitle: 'Inventory Dashboard',
+        currentView: 'item',
+        merchant: typeof merchant !== 'undefined' ? merchant : null,
+        merchantId: typeof merchantId !== 'undefined' ? merchantId : null,
+        merchants: typeof merchants !== 'undefined' ? merchants : []
+      }) %>
+
+  <table id="inventory-table">
+    <thead>
+      <tr>
+        <th class="sortable" data-key="merchant_name" data-type="string">Merchant</th>
+        <th class="sortable" data-key="location_name" data-type="string">Location</th>
+        <th class="sortable" data-key="category_name" data-type="string">Category</th>
+        <th class="sortable" data-key="item_name" data-type="string">Item</th>
+        <th class="sortable" data-key="variation_name" data-type="string">Variation</th>
+        <th class="sortable" data-key="sku" data-type="string">SKU</th>
+        <th class="sortable" data-key="gtin" data-type="string">GTIN</th>
+        <th class="sortable" data-key="qty" data-type="number">Qty</th>
+        <th class="sortable" data-key="state" data-type="string">State</th>
+        <th class="sortable" data-key="price" data-type="number">Price</th>
+        <th class="sortable" data-key="currency" data-type="string">Currency</th>
+        <th class="sortable" data-key="tax_names" data-type="string">Sales Tax</th>
+        <th class="sortable" data-key="calculated_at" data-type="string">Updated</th>
+      </tr>
+    </thead>
+    <tbody id="inventory-body">
+      <!-- Rows rendered by JS -->
+    </tbody>
+  </table>
+
+  <div class="pagination">
+    <span id="page-info"></span>
+    <span>
+      Rows per page:
+      <select id="rowsPerPage">
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="250">250</option>
+      </select>
+    </span>
+    <button id="prevPage">&laquo; Prev</button>
+    <button id="nextPage">Next &raquo;</button>
+  </div>
+
+  <%- include('partials/footer') %>
+
+  <script>
+    // Merchant switcher (exists only on item view)
+    const merchantSelect = document.getElementById('merchantSelect');
+    if (merchantSelect) {
+      merchantSelect.addEventListener('change', () => {
+        const val = merchantSelect.value;
+        if (val) {
+          window.location.href = val;
+        }
+      });
+    }
+
+    // View mode switcher
+    const viewSelect = document.getElementById('viewSelect');
+    viewSelect.addEventListener('change', () => {
+      const val = viewSelect.value;
+      if (val) {
+        window.location.href = val;
+      }
+    });
+
+    // ---------- Data & table state ----------
+
+    const rawRows = <%- JSON.stringify(rows || []) %>;
+
+    let allRows = rawRows.map((r, idx) => {
+      return {
+        _index: idx,
+        merchant_name: r.merchant_name || r.merchant_id || '',
+        location_name: r.location_name || r.location_id || '',
+        category_name: r.category_name || '',
+        item_name: r.item_name || '',
+        variation_name: r.variation_name || '',
+        sku: r.sku || '',
+        gtin: r.gtin || '',
+        qty: (r.qty !== undefined && r.qty !== null) ? Number(r.qty) : null,
+        state: r.state || '',
+        price: (r.price !== undefined && r.price !== null) ? Number(r.price) : null,
+        currency: r.currency || '',
+        tax_names: Array.isArray(r.tax_names) ? r.tax_names : [],
+        tax_percentages: Array.isArray(r.tax_percentages) ? r.tax_percentages : [],
+        calculated_at: r.calculated_at || r.updated_at || '',
+      };
+    });
+
+    let filteredRows = [...allRows];
+
+    let currentSort = {
+      key: null,
+      direction: 'asc',
+    };
+
+    let currentPage = 1;
+    let rowsPerPage = 50;
+
+    const tbody = document.getElementById('inventory-body');
+    const pageInfo = document.getElementById('page-info');
+    const rowsPerPageSelect = document.getElementById('rowsPerPage');
+    const prevBtn = document.getElementById('prevPage');
+    const nextBtn = document.getElementById('nextPage');
+    const searchInput = document.getElementById('search');
+    const headerCells = Array.from(
+      document.querySelectorAll('#inventory-table thead th.sortable')
+    );
+
+    // ---------- Rendering ----------
+
+    function renderTable() {
+      tbody.innerHTML = '';
+
+      const total = filteredRows.length;
+      if (total === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 13;
+        td.textContent = 'No inventory rows found.';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        pageInfo.textContent = '0 of 0';
+        prevBtn.disabled = true;
+        nextBtn.disabled = true;
+        return;
+      }
+
+      const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
+      if (currentPage > totalPages) currentPage = totalPages;
+      const startIndex = (currentPage - 1) * rowsPerPage;
+      const endIndex = Math.min(startIndex + rowsPerPage, total);
+
+      for (let i = startIndex; i < endIndex; i++) {
+        const r = filteredRows[i];
+        const tr = document.createElement('tr');
+
+        const taxText = r.tax_names && r.tax_names.length
+          ? r.tax_names.join(', ') +
+            (r.tax_percentages && r.tax_percentages.length
+              ? ' (' + r.tax_percentages.join(', ') + ' %)'
+              : '')
+          : '';
+
+        const cells = [
+          r.merchant_name,
+          r.location_name,
+          r.category_name,
+          r.item_name,
+          r.variation_name,
+          r.sku,
+          r.gtin,
+          (r.qty !== null && r.qty !== undefined) ? r.qty : '',
+          r.state,
+          (r.price !== null && r.price !== undefined)
+            ? r.price.toFixed(2)
+            : '',
+          r.currency,
+          taxText,
+          r.calculated_at,
+        ];
+
+        cells.forEach(text => {
+          const td = document.createElement('td');
+          td.textContent = text;
+          tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
+      }
+
+      pageInfo.textContent = `Page ${currentPage} of ${Math.max(
+        1,
+        Math.ceil(total / rowsPerPage)
+      )}  (Total rows: ${total})`;
+
+      prevBtn.disabled = currentPage <= 1;
+      nextBtn.disabled = currentPage >= Math.ceil(total / rowsPerPage);
+    }
+
+    // ---------- Sorting ----------
+
+    function clearSortIndicators() {
+      headerCells.forEach(th => {
+        th.classList.remove('sorted-asc', 'sorted-desc');
+      });
+    }
+
+    function sortBy(key, type) {
+      if (!key) return;
+
+      if (currentSort.key === key) {
+        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        currentSort.key = key;
+        currentSort.direction = 'asc';
+      }
+
+      const dir = currentSort.direction === 'asc' ? 1 : -1;
+
+      filteredRows.sort((a, b) => {
+        const va = a[key];
+        const vb = b[key];
+
+        if (type === 'number') {
+          const na = (va === null || va === undefined || isNaN(va)) ? 0 : Number(va);
+          const nb = (vb === null || vb === undefined || isNaN(vb)) ? 0 : Number(vb);
+          if (na < nb) return -1 * dir;
+          if (na > nb) return 1 * dir;
+          return 0;
+        } else if (type === 'string') {
+          const sa = (Array.isArray(va) ? va.join(', ') : (va || '')).toString().toLowerCase();
+          const sb = (Array.isArray(vb) ? vb.join(', ') : (vb || '')).toString().toLowerCase();
+          if (sa < sb) return -1 * dir;
+          if (sa > sb) return 1 * dir;
+          return 0;
+        } else {
+          return 0;
+        }
+      });
+
+      clearSortIndicators();
+      headerCells.forEach(th => {
+        if (th.dataset.key === key) {
+          th.classList.add(
+            currentSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc'
+          );
+        }
+      });
+
+      currentPage = 1;
+      renderTable();
+    }
+
+    headerCells.forEach(th => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.key;
+        const type = th.dataset.type || 'string';
+        sortBy(key, type);
+      });
+    });
+
+    // ---------- Search ----------
+
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.trim().toLowerCase();
+      if (!q) {
+        filteredRows = [...allRows];
+      } else {
+        filteredRows = allRows.filter(r => {
+          const textParts = [
+            r.merchant_name,
+            r.location_name,
+            r.category_name,
+            r.item_name,
+            r.variation_name,
+            r.sku,
+            r.gtin,
+            r.state,
+            r.currency,
+            r.tax_names.join(', '),
+            r.calculated_at,
+          ];
+          return textParts.join(' ').toLowerCase().includes(q);
+        });
+      }
+      currentPage = 1;
+      renderTable();
+    });
+
+    // ---------- Pagination controls ----------
+
+    rowsPerPageSelect.addEventListener('change', () => {
+      rowsPerPage = Number(rowsPerPageSelect.value) || 50;
+      currentPage = 1;
+      renderTable();
+    });
+
+    prevBtn.addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        renderTable();
+      }
+    });
+
+    nextBtn.addEventListener('click', () => {
+      const total = filteredRows.length;
+      const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
+      if (currentPage < totalPages) {
+        currentPage++;
+        renderTable();
+      }
+    });
+
+    // ---------- Initial render ----------
+
+    renderTable();
+  </script>
+</body>
+</html>

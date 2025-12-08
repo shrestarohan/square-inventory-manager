@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Reports</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- Shared header with nav + user + filters -->
+  <%- include('partials/header', {
+    pageTitle: 'Reports',
+    currentView: 'reports',     // so header doesn't show the merchant dropdown
+    merchants: merchants || [], // safe defaults
+    merchantId: null,
+    merchant: null,
+    activePage: 'reports'
+  }) %>
+
+  <main>
+    <!-- High-level metrics -->
+    <section class="hint">
+      Summary of your inventory and pricing across all connected merchants.
+    </section>
+
+    <section style="margin-top: 12px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Total Merchants</td>
+            <td><%= (metrics && metrics.totalMerchants) || 0 %></td>
+          </tr>
+          <tr>
+            <td>Total Items (All Merchants)</td>
+            <td><%= (metrics && metrics.totalItems) || 0 %></td>
+          </tr>
+          <tr>
+            <td>Items with GTIN</td>
+            <td><%= (metrics && metrics.itemsWithGtin) || 0 %></td>
+          </tr>
+          <tr>
+            <td>Price Mismatch Count</td>
+            <td><%= (metrics && metrics.priceMismatchCount) || 0 %></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Example: recent sync runs -->
+    <section style="margin-top: 20px;">
+      <h2 style="font-size: 16px; margin-bottom: 8px;">Recent Inventory Sync Runs</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Run Time</th>
+            <th>Status</th>
+            <th>Merchants Updated</th>
+            <th>Items Processed</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% if (syncRuns && syncRuns.length) { %>
+            <% syncRuns.forEach(run => { %>
+              <tr>
+                <td><%= run.runAt || '' %></td>
+                <td><%= run.status || '' %></td>
+                <td><%= run.merchantsUpdated || 0 %></td>
+                <td><%= run.itemsProcessed || 0 %></td>
+              </tr>
+            <% }) %>
+          <% } else { %>
+            <tr>
+              <td colspan="4">No sync history available yet.</td>
+            </tr>
+          <% } %>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
