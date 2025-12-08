@@ -702,6 +702,53 @@ app.post('/api/update-item-name', async (req, res) => {
   }
 });
 
+app.post('/api/analyze-gtin', requireLogin, async (req, res) => {
+  try {
+    const { gtin } = req.body;
+    if (!gtin) {
+      return res.status(400).json({ error: 'gtin is required' });
+    }
+
+    // 1) Load inventory rows for this GTIN
+    const invSnapshot = await firestore
+      .collection('inventory')
+      .where('gtin', '==', gtin)
+      .get();
+
+    if (invSnapshot.empty) {
+      return res.status(404).json({ error: 'No items found for this GTIN' });
+    }
+
+    const items = invSnapshot.docs.map(d => {
+      const data = d.data();
+      return {
+        merchant_name: data.merchant_name || data.merchant_id || '',
+        item_name: data.item_name || '',
+        category_name: data.category_name || '',
+        sku: data.sku || '',
+      };
+    });
+
+    // 2) Load master canonical name if exists
+    const masterDoc = await firestore.collection('item_master').doc(gtin).get();
+    const masterName = masterDoc.exists ? (masterDoc.data().canonical_name || '') : '';
+
+    const payload = {
+      gtin,
+      item_master_name: masterName,
+      items,
+    };
+
+    // 3) Call AI model (implement this helper)
+    const aiResult = await analyzeGtinWithAI(payload);
+
+    res.json(aiResult);
+  } catch (err) {
+    console.error('Error in /api/analyze-gtin', err);
+    res.status(500).json({ error: err.message || 'Failed to analyze GTIN' });
+  }
+});
+
 // Only start the server if this file is run directly (node app.js / nodemon app.js)
 if (require.main === module) {
   const port = process.env.PORT || 8080;
