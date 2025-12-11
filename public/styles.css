@@ -232,3 +232,21 @@ tbody tr:hover {
 .mismatch-row input {
   background-color: rgba(220, 38, 38, 0.18);
 }
+
+.thumb-cell {
+  width: 60px;
+  text-align: center;
+}
+
+.thumb-img {
+  max-width: 48px;
+  max-height: 48px;
+  object-fit: contain;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.thumb-placeholder {
+  color: #aaa;
+  font-size: 12px;
+}

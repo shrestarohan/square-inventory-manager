@@ -6,10 +6,12 @@ const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 
 const path = require('path');
-const { Firestore } = require('@google-cloud/firestore');
+
 // Use the legacy Square client for now (simpler with Node.js CommonJS)
 const { Client, Environment } = require('square/legacy');
-const { syncAllMerchants } = require('./inventorySync');
+const { syncAllMerchants } = require('./lib/inventorySync');
+
+const { Firestore } = require('@google-cloud/firestore');
 const firestore = new Firestore();
 
 const app = express();
@@ -77,7 +79,7 @@ app.use((req, res, next) => {
 
 // Only allow specific Google Workspace / emails
 const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '')
-  .split(',')
+  .split(';')
   .map(e => e.trim().toLowerCase())
   .filter(Boolean);
 
@@ -169,7 +171,7 @@ app.get('/dashboard', requireLogin, async (req, res) => {
       .where('state', '==', 'IN_STOCK')
       .get();
 
-    const rows = invSnapshot.docs.map(d => d.data());
+    const rows = []; //invSnapshot.docs.map(d => d.data());
 
     // Load all merchants for the menu
     const merchantsSnap = await firestore.collection('merchants').get();
@@ -229,7 +231,7 @@ app.get('/dashboard/:merchantId', requireLogin, async (req, res) => {
       .where('state', '==', 'IN_STOCK')
       .get();
 
-    const rows = invSnapshot.docs.map(d => d.data());
+    const rows = []; //invSnapshot.docs.map(d => d.data());
 
     // Load all merchants for the menu
     const merchantsSnap = await firestore.collection('merchants').get();
@@ -748,6 +750,119 @@ app.post('/api/analyze-gtin', requireLogin, async (req, res) => {
     res.status(500).json({ error: err.message || 'Failed to analyze GTIN' });
   }
 });
+
+// GET /api/gtin-meta
+app.get('/api/gtin-meta', async (req, res) => {
+  try {
+    const snapshot = await firestore
+      .collection('gtinMeta')
+      .orderBy('gtin')
+      .get();
+
+    const data = [];
+    snapshot.forEach((doc) => data.push({ id: doc.id, ...doc.data() }));
+    res.json(data);
+  } catch (err) {
+    console.error('Error fetching gtinMeta:', err);
+    res.status(500).json({ error: 'Failed to fetch data' });
+  }
+});
+
+// PUT /api/gtin-meta/:gtin
+app.put('/api/gtin-meta/:gtin', async (req, res) => {
+  try {
+    const gtin = req.params.gtin;
+    const { sku, itemName, vendorName, unitCost } = req.body;
+
+    if (!gtin) {
+      return res.status(400).json({ error: 'Missing gtin' });
+    }
+
+    const docRef = firestore.collection('gtinMeta').doc(gtin);
+
+    const payload = {
+      updatedAt: new Date().toISOString(),
+    };
+    if (sku !== undefined) payload.sku = sku || null;
+    if (itemName !== undefined) payload.itemName = itemName || null;
+    if (vendorName !== undefined) payload.vendorName = vendorName || null;
+    if (unitCost !== undefined) {
+      payload.unitCost =
+        unitCost === null || unitCost === '' ? null : Number(unitCost);
+    }
+
+    await docRef.set(payload, { merge: true });
+    const snap = await docRef.get();
+
+    res.json({ id: snap.id, ...snap.data() });
+  } catch (err) {
+    console.error('Error updating gtinMeta:', err);
+    res.status(500).json({ error: 'Failed to update data' });
+  }
+});
+
+app.get('/dashboard-vendor-costs', requireLogin, async (req, res) => {
+  const merchants = []; // or load like on other pages
+  res.render('dashboard-vendor-costs', {
+    merchants,
+    pageTitle: 'Vendor & Unit Cost',
+    currentView: 'vendorCosts',
+    activePage: 'dashboard-vendor-costs',
+    user: req.user || null,
+  });
+});
+
+// GET /api/inventory?merchantId=...&pageSize=50&cursor=docId
+app.get('/api/inventory', async (req, res) => {
+  try {
+    const merchantId = req.query.merchantId || null;
+    const pageSize = Math.min(
+      Number(req.query.pageSize) || 50,
+      500 // safety cap
+    );
+    const cursorId = req.query.cursor || null;
+
+    let colRef;
+    if (merchantId) {
+      // Per-merchant inventory
+      colRef = firestore
+        .collection('merchants')
+        .doc(merchantId)
+        .collection('inventory');
+    } else {
+      // Master inventory (all merchants)
+      colRef = firestore.collection('inventory');
+    }
+
+    let query = colRef.orderBy('__name__').limit(pageSize);
+
+    if (cursorId) {
+      const cursorDoc = await colRef.doc(cursorId).get();
+      if (cursorDoc.exists) {
+        query = query.startAfter(cursorDoc);
+      }
+    }
+
+    const snap = await query.get();
+
+    const rows = snap.docs.map((d) => ({
+      id: d.id,
+      ...d.data(),
+    }));
+
+    const nextCursor =
+      snap.size > 0 ? snap.docs[snap.docs.length - 1].id : null;
+
+    res.json({
+      rows,
+      nextCursor,
+    });
+  } catch (err) {
+    console.error('Error in /api/inventory:', err);
+    res.status(500).json({ error: 'Internal error loading inventory' });
+  }
+});
+
 
 // Only start the server if this file is run directly (node app.js / nodemon app.js)
 if (require.main === module) {

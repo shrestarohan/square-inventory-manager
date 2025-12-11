@@ -17,6 +17,7 @@
   <table id="inventory-table">
     <thead>
       <tr>
+        <th>Image</th>
         <th class="sortable" data-key="merchant_name" data-type="string">Merchant</th>
         <th class="sortable" data-key="location_name" data-type="string">Location</th>
         <th class="sortable" data-key="category_name" data-type="string">Category</th>
@@ -54,7 +55,7 @@
 
   <%- include('partials/footer') %>
 
-  <script>
+    <script>
     // Merchant switcher (exists only on item view)
     const merchantSelect = document.getElementById('merchantSelect');
     if (merchantSelect) {
@@ -68,20 +69,47 @@
 
     // View mode switcher
     const viewSelect = document.getElementById('viewSelect');
-    viewSelect.addEventListener('change', () => {
-      const val = viewSelect.value;
-      if (val) {
-        window.location.href = val;
-      }
-    });
+    if (viewSelect) {
+      viewSelect.addEventListener('change', () => {
+        const val = viewSelect.value;
+        if (val) {
+          window.location.href = val;
+        }
+      });
+    }
 
-    // ---------- Data & table state ----------
+    // ---------- Data & table state (now loaded via API) ----------
 
-    const rawRows = <%- JSON.stringify(rows || []) %>;
+    const DASHBOARD_MERCHANT_ID = <%- JSON.stringify(merchantId || null) %>;
 
-    let allRows = rawRows.map((r, idx) => {
+    let pages = [];      // array of { rows, nextCursor }
+    let cursors = [null]; // cursors[pageIndex] = cursor used to load that page's data
+    let currentPageIndex = 0;
+
+    let rowsPerPage = 50;
+    const tbody = document.getElementById('inventory-body');
+    const pageInfo = document.getElementById('page-info');
+    const rowsPerPageSelect = document.getElementById('rowsPerPage');
+    const prevBtn = document.getElementById('prevPage');
+    const nextBtn = document.getElementById('nextPage');
+    const searchInput = document.getElementById('search');
+    const headerCells = Array.from(
+      document.querySelectorAll('#inventory-table thead th.sortable')
+    );
+
+    // Current page rows after search/sort
+    let currentRows = [];
+    let currentSort = {
+      key: null,
+      direction: 'asc',
+    };
+
+    // ---------- Helper: transform raw row ----------
+
+    function mapRow(r, idx) {
       return {
         _index: idx,
+        id: r.id || r.docId || '',
         merchant_name: r.merchant_name || r.merchant_id || '',
         location_name: r.location_name || r.location_id || '',
         category_name: r.category_name || '',
@@ -96,170 +124,69 @@
         tax_names: Array.isArray(r.tax_names) ? r.tax_names : [],
         tax_percentages: Array.isArray(r.tax_percentages) ? r.tax_percentages : [],
         calculated_at: r.calculated_at || r.updated_at || '',
+        image_urls: Array.isArray(r.image_urls)
+          ? r.image_urls
+          : (r.image_urls ? [r.image_urls] : []),
       };
-    });
-
-    let filteredRows = [...allRows];
-
-    let currentSort = {
-      key: null,
-      direction: 'asc',
-    };
-
-    let currentPage = 1;
-    let rowsPerPage = 50;
-
-    const tbody = document.getElementById('inventory-body');
-    const pageInfo = document.getElementById('page-info');
-    const rowsPerPageSelect = document.getElementById('rowsPerPage');
-    const prevBtn = document.getElementById('prevPage');
-    const nextBtn = document.getElementById('nextPage');
-    const searchInput = document.getElementById('search');
-    const headerCells = Array.from(
-      document.querySelectorAll('#inventory-table thead th.sortable')
-    );
-
-    // ---------- Rendering ----------
-
-    function renderTable() {
-      tbody.innerHTML = '';
-
-      const total = filteredRows.length;
-      if (total === 0) {
-        const tr = document.createElement('tr');
-        const td = document.createElement('td');
-        td.colSpan = 13;
-        td.textContent = 'No inventory rows found.';
-        tr.appendChild(td);
-        tbody.appendChild(tr);
-        pageInfo.textContent = '0 of 0';
-        prevBtn.disabled = true;
-        nextBtn.disabled = true;
-        return;
-      }
-
-      const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
-      if (currentPage > totalPages) currentPage = totalPages;
-      const startIndex = (currentPage - 1) * rowsPerPage;
-      const endIndex = Math.min(startIndex + rowsPerPage, total);
-
-      for (let i = startIndex; i < endIndex; i++) {
-        const r = filteredRows[i];
-        const tr = document.createElement('tr');
-
-        const taxText = r.tax_names && r.tax_names.length
-          ? r.tax_names.join(', ') +
-            (r.tax_percentages && r.tax_percentages.length
-              ? ' (' + r.tax_percentages.join(', ') + ' %)'
-              : '')
-          : '';
-
-        const cells = [
-          r.merchant_name,
-          r.location_name,
-          r.category_name,
-          r.item_name,
-          r.variation_name,
-          r.sku,
-          r.gtin,
-          (r.qty !== null && r.qty !== undefined) ? r.qty : '',
-          r.state,
-          (r.price !== null && r.price !== undefined)
-            ? r.price.toFixed(2)
-            : '',
-          r.currency,
-          taxText,
-          r.calculated_at,
-        ];
-
-        cells.forEach(text => {
-          const td = document.createElement('td');
-          td.textContent = text;
-          tr.appendChild(td);
-        });
-
-        tbody.appendChild(tr);
-      }
-
-      pageInfo.textContent = `Page ${currentPage} of ${Math.max(
-        1,
-        Math.ceil(total / rowsPerPage)
-      )}  (Total rows: ${total})`;
-
-      prevBtn.disabled = currentPage <= 1;
-      nextBtn.disabled = currentPage >= Math.ceil(total / rowsPerPage);
     }
 
-    // ---------- Sorting ----------
+    // ---------- API fetch ----------
 
-    function clearSortIndicators() {
-      headerCells.forEach(th => {
-        th.classList.remove('sorted-asc', 'sorted-desc');
-      });
-    }
+    async function fetchPage(pageIndexToLoad) {
+      const cursor = cursors[pageIndexToLoad] || null;
+      const size = rowsPerPage;
 
-    function sortBy(key, type) {
-      if (!key) return;
-
-      if (currentSort.key === key) {
-        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
-      } else {
-        currentSort.key = key;
-        currentSort.direction = 'asc';
+      const params = new URLSearchParams();
+      params.set('pageSize', size.toString());
+      if (DASHBOARD_MERCHANT_ID) {
+        params.set('merchantId', DASHBOARD_MERCHANT_ID);
+      }
+      if (cursor) {
+        params.set('cursor', cursor);
       }
 
-      const dir = currentSort.direction === 'asc' ? 1 : -1;
+      const url = '/api/inventory?' + params.toString();
+      console.log('Fetching inventory page:', url);
 
-      filteredRows.sort((a, b) => {
-        const va = a[key];
-        const vb = b[key];
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.error('Failed to load inventory page:', await res.text());
+        throw new Error('Failed to load inventory');
+      }
+      const data = await res.json();
+      const rawRows = data.rows || [];
+      const mapped = rawRows.map(mapRow);
 
-        if (type === 'number') {
-          const na = (va === null || va === undefined || isNaN(va)) ? 0 : Number(va);
-          const nb = (vb === null || vb === undefined || isNaN(vb)) ? 0 : Number(vb);
-          if (na < nb) return -1 * dir;
-          if (na > nb) return 1 * dir;
-          return 0;
-        } else if (type === 'string') {
-          const sa = (Array.isArray(va) ? va.join(', ') : (va || '')).toString().toLowerCase();
-          const sb = (Array.isArray(vb) ? vb.join(', ') : (vb || '')).toString().toLowerCase();
-          if (sa < sb) return -1 * dir;
-          if (sa > sb) return 1 * dir;
-          return 0;
-        } else {
-          return 0;
-        }
-      });
+      const nextCursor = data.nextCursor || null;
 
-      clearSortIndicators();
-      headerCells.forEach(th => {
-        if (th.dataset.key === key) {
-          th.classList.add(
-            currentSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc'
-          );
-        }
-      });
+      // store this page
+      pages[pageIndexToLoad] = {
+        rows: mapped,
+        nextCursor,
+      };
 
-      currentPage = 1;
-      renderTable();
+      // store cursor for NEXT page
+      cursors[pageIndexToLoad + 1] = nextCursor;
+
+      return mapped;
     }
 
-    headerCells.forEach(th => {
-      th.addEventListener('click', () => {
-        const key = th.dataset.key;
-        const type = th.dataset.type || 'string';
-        sortBy(key, type);
-      });
-    });
+    async function loadPage(pageIndex) {
+      currentPageIndex = pageIndex;
 
-    // ---------- Search ----------
+      let page = pages[pageIndex];
 
-    searchInput.addEventListener('input', () => {
-      const q = searchInput.value.trim().toLowerCase();
-      if (!q) {
-        filteredRows = [...allRows];
-      } else {
-        filteredRows = allRows.filter(r => {
+      if (!page) {
+        const rows = await fetchPage(pageIndex);
+        page = pages[pageIndex];
+      }
+
+      let pageRows = page.rows || [];
+
+      // apply current search filter
+      const q = (searchInput.value || '').trim().toLowerCase();
+      if (q) {
+        pageRows = pageRows.filter((r) => {
           const textParts = [
             r.merchant_name,
             r.location_name,
@@ -276,37 +203,218 @@
           return textParts.join(' ').toLowerCase().includes(q);
         });
       }
-      currentPage = 1;
+
+      // sort inside page
+      if (currentSort.key) {
+        const key = currentSort.key;
+        const type = currentSort.type || 'string';
+        const dir = currentSort.direction === 'asc' ? 1 : -1;
+
+        pageRows.sort((a, b) => {
+          const va = a[key];
+          const vb = b[key];
+
+          if (type === 'number') {
+            const na =
+              va === null || va === undefined || isNaN(va) ? 0 : Number(va);
+            const nb =
+              vb === null || vb === undefined || isNaN(vb) ? 0 : Number(vb);
+            if (na < nb) return -1 * dir;
+            if (na > nb) return 1 * dir;
+            return 0;
+          } else {
+            const sa = (
+              Array.isArray(va) ? va.join(', ') : (va || '')
+            )
+              .toString()
+              .toLowerCase();
+            const sb = (
+              Array.isArray(vb) ? vb.join(', ') : (vb || '')
+            )
+              .toString()
+              .toLowerCase();
+            if (sa < sb) return -1 * dir;
+            if (sa > sb) return 1 * dir;
+            return 0;
+          }
+        });
+      }
+
+      currentRows = pageRows;
       renderTable();
+    }
+
+    // ---------- Rendering ----------
+
+    function renderTable() {
+      tbody.innerHTML = '';
+
+      const total = currentRows.length;
+      if (total === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 14; // 14 columns including Image
+        td.textContent = 'No inventory rows found.';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+
+        pageInfo.textContent = `Page ${currentPageIndex + 1} (0 rows)`;
+        prevBtn.disabled = currentPageIndex <= 0;
+        nextBtn.disabled =
+          !pages[currentPageIndex] ||
+          !pages[currentPageIndex].nextCursor;
+        return;
+      }
+
+      currentRows.forEach((r) => {
+        const tr = document.createElement('tr');
+
+        const taxText =
+          r.tax_names && r.tax_names.length
+            ? r.tax_names.join(', ') +
+              (r.tax_percentages && r.tax_percentages.length
+                ? ' (' + r.tax_percentages.join(', ') + ' %)'
+                : '')
+            : '';
+
+        // Image cell
+        const imgTd = document.createElement('td');
+        imgTd.className = 'thumb-cell';
+        if (r.image_urls && r.image_urls.length) {
+          const img = document.createElement('img');
+          img.src = r.image_urls[0];
+          img.alt = r.item_name || 'Item image';
+          img.loading = 'lazy';
+          img.className = 'thumb-img';
+          imgTd.appendChild(img);
+        } else {
+          const span = document.createElement('span');
+          span.className = 'thumb-placeholder';
+          span.textContent = '–';
+          imgTd.appendChild(span);
+        }
+        tr.appendChild(imgTd);
+
+        const cells = [
+          r.merchant_name,
+          r.location_name,
+          r.category_name,
+          r.item_name,
+          r.variation_name,
+          r.sku,
+          r.gtin,
+          r.qty !== null && r.qty !== undefined ? r.qty : '',
+          r.state,
+          r.price !== null && r.price !== undefined
+            ? r.price.toFixed(2)
+            : '',
+          r.currency,
+          taxText,
+          r.calculated_at,
+        ];
+
+        cells.forEach((text) => {
+          const td = document.createElement('td');
+          td.textContent = text;
+          tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
+      });
+
+      const page = pages[currentPageIndex];
+      const hasNext = page && page.nextCursor;
+
+      pageInfo.textContent = `Page ${currentPageIndex + 1} (rows: ${currentRows.length})`;
+
+      prevBtn.disabled = currentPageIndex <= 0;
+      nextBtn.disabled = !hasNext;
+    }
+
+    // ---------- Sorting ----------
+
+    function clearSortIndicators() {
+      headerCells.forEach((th) => {
+        th.classList.remove('sorted-asc', 'sorted-desc');
+      });
+    }
+
+    function sortBy(key, type) {
+      if (!key) return;
+
+      if (currentSort.key === key) {
+        currentSort.direction =
+          currentSort.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        currentSort.key = key;
+        currentSort.direction = 'asc';
+      }
+      currentSort.type = type || 'string';
+
+      clearSortIndicators();
+      headerCells.forEach((th) => {
+        if (th.dataset.key === key) {
+          th.classList.add(
+            currentSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc'
+          );
+        }
+      });
+
+      // re-sort current page only
+      if (pages[currentPageIndex]) {
+        loadPage(currentPageIndex);
+      }
+    }
+
+    headerCells.forEach((th) => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.key;
+        const type = th.dataset.type || 'string';
+        sortBy(key, type);
+      });
+    });
+
+    // ---------- Search (within current page) ----------
+
+    searchInput.addEventListener('input', () => {
+      if (pages[currentPageIndex]) {
+        loadPage(currentPageIndex);
+      }
     });
 
     // ---------- Pagination controls ----------
 
     rowsPerPageSelect.addEventListener('change', () => {
       rowsPerPage = Number(rowsPerPageSelect.value) || 50;
-      currentPage = 1;
-      renderTable();
+      // Reset pages & cursors and reload from first page
+      pages = [];
+      cursors = [null];
+      currentPageIndex = 0;
+      loadPage(0);
     });
 
     prevBtn.addEventListener('click', () => {
-      if (currentPage > 1) {
-        currentPage--;
-        renderTable();
+      if (currentPageIndex > 0) {
+        currentPageIndex--;
+        loadPage(currentPageIndex);
       }
     });
 
     nextBtn.addEventListener('click', () => {
-      const total = filteredRows.length;
-      const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
-      if (currentPage < totalPages) {
-        currentPage++;
-        renderTable();
+      const page = pages[currentPageIndex];
+      if (page && page.nextCursor) {
+        currentPageIndex++;
+        loadPage(currentPageIndex);
       }
     });
 
-    // ---------- Initial render ----------
+    // ---------- Initial render (load first page) ----------
 
-    renderTable();
+    (async () => {
+      rowsPerPage = Number(rowsPerPageSelect.value) || 50;
+      await loadPage(0);
+    })();
   </script>
+
 </body>
 </html>

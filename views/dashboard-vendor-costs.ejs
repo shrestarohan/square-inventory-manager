@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Vendor & Unit Cost</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- Shared header with nav + user + filters -->
+  <%- include('partials/header', {
+    pageTitle: 'Vendor & Unit Cost',
+    currentView: 'vendorCosts',     // distinct view key for this page
+    merchants: merchants || [],     // safe defaults if you pass merchants from route
+    merchantId: null,
+    merchant: null,
+    activePage: 'dashboard-vendor-costs'
+  }) %>
+
+  <main>
+    <!-- Page description -->
+    <section class="hint">
+      Manage vendor names and unit cost for each GTIN. Values are stored in Firestore and can be edited inline.
+    </section>
+
+    <section style="margin-top: 12px;">
+      <div id="status" class="status"></div>
+
+      <table id="gtin-table">
+        <thead>
+          <tr>
+            <th>GTIN</th>
+            <th>SKU</th>
+            <th>Item Name</th>
+            <th>Vendor Name</th>
+            <th>Unit Cost</th>
+            <th>Updated At</th>
+            <th>Save</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <!-- 7 columns -->
+            <td colspan="7">Loading...</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Pagination controls -->
+      <div id="pagination" class="pagination" style="margin-top: 10px;"></div>
+    </section>
+  </main>
+
+  <script>
+    const statusEl = document.getElementById('status');
+
+    // in-memory data + pagination state
+    let allData = [];
+    let filteredData = [];
+    let currentPage = 1;
+    const pageSize = 50; // rows per page
+
+    function setStatus(msg) {
+      if (!statusEl) return;
+      statusEl.textContent = msg || '';
+    }
+
+    function renderPagination(totalPages) {
+      const container = document.getElementById('pagination');
+      if (!container) return;
+
+      container.innerHTML = '';
+
+      if (!filteredData.length) {
+        container.textContent = 'No items to display.';
+        return;
+      }
+
+      if (totalPages <= 1) {
+        container.textContent = `Showing ${filteredData.length} item(s).`;
+        return;
+      }
+
+      const info = document.createElement('span');
+      info.textContent = `Page ${currentPage} of ${totalPages} (${filteredData.length} item(s))`;
+      info.style.marginRight = '12px';
+
+      const prevBtn = document.createElement('button');
+      prevBtn.type = 'button';
+      prevBtn.textContent = 'Previous';
+      prevBtn.disabled = currentPage === 1;
+      prevBtn.style.marginRight = '6px';
+      prevBtn.addEventListener('click', () => {
+        if (currentPage > 1) {
+          currentPage -= 1;
+          renderTable();
+        }
+      });
+
+      const nextBtn = document.createElement('button');
+      nextBtn.type = 'button';
+      nextBtn.textContent = 'Next';
+      nextBtn.disabled = currentPage >= totalPages;
+      nextBtn.addEventListener('click', () => {
+        if (currentPage < totalPages) {
+          currentPage += 1;
+          renderTable();
+        }
+      });
+
+      container.appendChild(info);
+      container.appendChild(prevBtn);
+      container.appendChild(nextBtn);
+    }
+
+    function renderTable() {
+      const tbody = document.querySelector('#gtin-table tbody');
+      if (!tbody) return;
+
+      tbody.innerHTML = '';
+
+      if (!filteredData.length) {
+        const trEmpty = document.createElement('tr');
+        trEmpty.innerHTML = '<td colspan="7">No GTIN metadata found.</td>';
+        tbody.appendChild(trEmpty);
+        renderPagination(1);
+        return;
+      }
+
+      const totalPages = Math.max(1, Math.ceil(filteredData.length / pageSize));
+      if (currentPage > totalPages) currentPage = totalPages;
+
+      const start = (currentPage - 1) * pageSize;
+      const end = start + pageSize;
+      const pageRows = filteredData.slice(start, end);
+
+      pageRows.forEach(row => {
+        const tr = document.createElement('tr');
+        const gtin = row.gtin || row.id || '';
+
+        tr.innerHTML = `
+          <td>${gtin}</td>
+          <td><input value="${row.sku || ''}" data-field="sku" /></td>
+          <td><input value="${row.itemName || ''}" data-field="itemName" /></td>
+          <td><input value="${row.vendorName || ''}" data-field="vendorName" /></td>
+          <td><input type="number" step="0.01" value="${row.unitCost ?? ''}" data-field="unitCost" /></td>
+          <td>${row.updatedAt || ''}</td>
+          <td><button type="button">Save</button></td>
+        `;
+
+        const saveBtn = tr.querySelector('button');
+        saveBtn.addEventListener('click', async () => {
+          const sku = tr.querySelector('input[data-field="sku"]').value;
+          const itemName = tr.querySelector('input[data-field="itemName"]').value;
+          const vendorName = tr.querySelector('input[data-field="vendorName"]').value;
+          const unitCostVal = tr.querySelector('input[data-field="unitCost"]').value;
+
+          const body = {
+            sku,
+            itemName,
+            vendorName,
+            unitCost: unitCostVal === '' ? null : Number(unitCostVal),
+          };
+
+          setStatus('Saving ' + gtin + ' ...');
+
+          try {
+            const resp = await fetch('/api/gtin-meta/' + encodeURIComponent(gtin), {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+
+            if (!resp.ok) {
+              setStatus('Error saving ' + gtin);
+              return;
+            }
+
+            const updated = await resp.json();
+            // update "Updated At" cell
+            tr.children[5].textContent = updated.updatedAt || '';
+            setStatus('Saved ' + gtin);
+
+            // keep in-memory data in sync
+            row.sku = sku;
+            row.itemName = itemName;
+            row.vendorName = vendorName;
+            row.unitCost = body.unitCost;
+            row.updatedAt = updated.updatedAt || row.updatedAt;
+          } catch (err) {
+            console.error(err);
+            setStatus('Error saving ' + gtin);
+          }
+        });
+
+        tbody.appendChild(tr);
+      });
+
+      renderPagination(totalPages);
+    }
+
+    function applyFilter(query) {
+      const q = (query || '').trim().toLowerCase();
+      if (!q) {
+        filteredData = allData.slice();
+      } else {
+        filteredData = allData.filter(row => {
+          const gtin = (row.gtin || row.id || '').toString().toLowerCase();
+          const sku = (row.sku || '').toString().toLowerCase();
+          const itemName = (row.itemName || '').toString().toLowerCase();
+          const vendorName = (row.vendorName || '').toString().toLowerCase();
+          return (
+            gtin.includes(q) ||
+            sku.includes(q) ||
+            itemName.includes(q) ||
+            vendorName.includes(q)
+          );
+        });
+      }
+      currentPage = 1;
+      renderTable();
+    }
+
+    async function loadData() {
+      try {
+        setStatus('Loading...');
+        const res = await fetch('/api/gtin-meta');
+        if (!res.ok) {
+          setStatus('Failed to load data');
+          return;
+        }
+        const data = await res.json();
+
+        // store full data set in memory
+        allData = Array.isArray(data) ? data : [];
+        filteredData = allData.slice();
+
+        setStatus('Loaded ' + allData.length + ' row(s).');
+
+        // hook up search once
+        const searchInput = document.getElementById('search');
+        if (searchInput && !searchInput.dataset.boundToVendorCosts) {
+          searchInput.dataset.boundToVendorCosts = 'true';
+          searchInput.addEventListener('input', () => {
+            applyFilter(searchInput.value);
+          });
+        }
+
+        // initial render (possibly with existing search query)
+        applyFilter(searchInput ? searchInput.value : '');
+      } catch (err) {
+        console.error(err);
+        setStatus('Error loading data');
+      }
+    }
+
+    loadData();
+  </script>
+</body>
+</html>

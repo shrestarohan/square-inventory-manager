@@ -55,6 +55,13 @@
       >
         Dashboard Price Mismatch
       </a>
+
+      <a
+        href="/dashboard-vendor-costs"
+        class="nav-link <%= activePage === 'dashboard_gtin' ? 'active' : '' %>"
+      >
+        Dashboard Vendor and Costs
+      </a>
     </nav>
   </div>
 
@@ -89,6 +96,9 @@
           </option>
           <option value="/dashboard-gtin" <%= currentView === 'gtin' ? 'selected' : '' %>>
             GTIN Master (Price by Location)
+          </option>
+          <option value="/dashboard-vendor-costs" <%= currentView === 'vendorCosts' ? 'selected' : '' %>>
+            Vendor &amp; Unit Cost
           </option>
         </select>
       </div>

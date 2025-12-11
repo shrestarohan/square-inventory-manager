@@ -4,7 +4,13 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon app.js"
+    "dev": "nodemon app.js",
+    "sync:gtin-meta": "node scripts/syncSheetToFirestore.js",
+    "proper:item-names": "node scripts/properCaseItemNames.js",
+    "sync:gtin-names:square": "node scripts/syncGtinNamesToSquare.js",
+    "sync:item-names-to-square": "node scripts/syncFirestoreItemNamesToSquare.js",
+    "cleanup:itemName-field": "node scripts/cleanupInventoryItemNameField.js",
+    "sync:inventory": "node scripts/syncInventory.js"
   },
   "dependencies": {
     "@google-cloud/firestore": "^7.0.0",
@@ -12,6 +18,7 @@
     "ejs": "^3.1.9",
     "express": "^4.19.0",
     "express-session": "^1.18.2",
+    "googleapis": "^167.0.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "square": "^43.2.1"
