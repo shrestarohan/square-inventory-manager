@@ -250,3 +250,14 @@ tbody tr:hover {
   color: #aaa;
   font-size: 12px;
 }
+
+.btn-danger{
+  background:#ff4d4d;
+  border:1px solid rgba(255,77,77,.35);
+  color:#0b0f19;
+  font-weight:700;
+  border-radius:10px;
+  padding:6px 10px;
+  cursor:pointer;
+}
+.btn-danger:disabled{ opacity:.6; cursor:not-allowed; }

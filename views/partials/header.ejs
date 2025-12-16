@@ -1,3 +1,46 @@
+<!-- Global top loading bar (shown/hidden by page JS) -->
+<div id="top-loader" class="top-loader" aria-hidden="true">
+  <div id="top-loader-bar" class="top-loader__bar"></div>
+</div>
+
+<style>
+  .top-loader{
+    position: fixed; top: 0; left: 0; right: 0;
+    height: 3px; z-index: 9999;
+    background: rgba(255,255,255,0.08);
+    opacity: 0; pointer-events: none;
+    transition: opacity .15s ease;
+  }
+  .top-loader.is-on{ opacity: 1; }
+  .top-loader__bar{
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #4f7cff, #7aa2ff);
+    transition: width .2s ease;
+  }
+
+  .mini-spinner{
+    display:inline-block; width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,.25);
+    border-top-color: rgba(255,255,255,.9);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+    vertical-align: -2px;
+    margin-left: 8px;
+    visibility: hidden;
+  }
+  .mini-spinner.is-on{ visibility: visible; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* small status text near search */
+  #load-status{
+    margin-left: 10px;
+    font-size: 12px;
+    opacity: .75;
+    white-space: nowrap;
+  }
+</style>
+
 <div class="top-bar">
   <!-- Row 1: Title (left) + User/Logout (right) -->
   <div class="top-row top-row-main">
@@ -35,80 +78,74 @@
   <!-- Row 2: Main navigation (pages) -->
   <div class="top-row top-row-nav">
     <nav class="main-nav">
-      <a
-        href="/dashboard"
-        class="nav-link <%= activePage === 'dashboard' ? 'active' : '' %>"
-      >
+      <a href="/dashboard" class="nav-link <%= activePage === 'dashboard' ? 'active' : '' %>">
         Dashboard
       </a>
 
-      <a
-        href="/reports"
-        class="nav-link <%= activePage === 'reports' ? 'active' : '' %>"
-      >
+      <a href="/reports" class="nav-link <%= activePage === 'reports' ? 'active' : '' %>">
         Reports
       </a>
 
-      <a
-        href="/dashboard-gtin"
-        class="nav-link <%= activePage === 'dashboard_gtin' ? 'active' : '' %>"
-      >
-        Dashboard Price Mismatch
+      <a href="/dashboard-gtin" class="nav-link <%= activePage === 'dashboard-gtin' ? 'active' : '' %>">
+        Item Price Mismatch
       </a>
 
-      <a
-        href="/dashboard-vendor-costs"
-        class="nav-link <%= activePage === 'dashboard_gtin' ? 'active' : '' %>"
-      >
-        Dashboard Vendor and Costs
+      <a href="/dashboard-vendor-costs" class="nav-link <%= activePage === 'dashboard-vendor-costs' ? 'active' : '' %>">
+        Item Vendor and Costs
+      </a>
+      
+      <a href="/duplicates-gtin" class="nav-link <%= activePage === 'duplicates-gtin' ? 'active' : '' %>">
+        Duplicate GTINs
       </a>
     </nav>
   </div>
 
-  <!-- Row 3: Filters (merchant + view + search) -->
-  <div class="top-row top-row-filters">
-    <div class="nav-left">
-      <% if (currentView === 'item') { %>
+  <% const hideFilters = (typeof showFilters !== 'undefined') ? !showFilters : false; %>
+
+  <% if (!hideFilters) { %>
+    <!-- Row 3: Filters (merchant + view + search) -->
+    <div class="top-row top-row-filters">
+      <div class="nav-left">
+        <% if (currentView === 'item') { %>
+          <div class="nav-block">
+            <label for="merchantSelect"><strong>Merchant:</strong></label>
+            <select id="merchantSelect">
+              <option value="/dashboard" <%= !merchantId ? 'selected' : '' %>>
+                All Merchants (Master)
+              </option>
+              <% if (merchants && merchants.length) { %>
+                <% merchants.forEach(m => { %>
+                  <option value="/dashboard/<%= m.id %>" <%= merchantId === m.id ? 'selected' : '' %>>
+                    <%= m.business_name || m.id %>
+                  </option>
+                <% }) %>
+              <% } %>
+            </select>
+          </div>
+        <% } %>
+
         <div class="nav-block">
-          <label for="merchantSelect"><strong>Merchant:</strong></label>
-          <select id="merchantSelect">
-            <option value="/dashboard" <%= !merchantId ? 'selected' : '' %>>
-              All Merchants (Master)
+          <label for="viewSelect"><strong>View:</strong></label>
+          <select id="viewSelect">
+            <option value="/dashboard" <%= currentView === 'item' ? 'selected' : '' %>>
+              Per Item / Per Merchant
             </option>
-            <% if (merchants && merchants.length) { %>
-              <% merchants.forEach(m => { %>
-                <option
-                  value="/dashboard/<%= m.id %>"
-                  <%= merchantId === m.id ? 'selected' : '' %>>
-                  <%= m.business_name || m.id %>
-                </option>
-              <% }) %>
-            <% } %>
+            <option value="/dashboard-gtin" <%= currentView === 'gtin' ? 'selected' : '' %>>
+              GTIN Master (Price by Location)
+            </option>
+            <option value="/dashboard-vendor-costs" <%= currentView === 'vendorCosts' ? 'selected' : '' %>>
+              Vendor &amp; Unit Cost
+            </option>
           </select>
         </div>
-      <% } %>
+      </div>
 
-      <div class="nav-block">
-        <label for="viewSelect"><strong>View:</strong></label>
-        <select id="viewSelect">
-          <option value="/dashboard" <%= currentView === 'item' ? 'selected' : '' %>>
-            Per Item / Per Merchant
-          </option>
-          <option value="/dashboard-gtin" <%= currentView === 'gtin' ? 'selected' : '' %>>
-            GTIN Master (Price by Location)
-          </option>
-          <option value="/dashboard-vendor-costs" <%= currentView === 'vendorCosts' ? 'selected' : '' %>>
-            Vendor &amp; Unit Cost
-          </option>
-        </select>
+      <div class="filters" style="display:flex;align-items:center;gap:8px;">
+        <input id="search" placeholder="Search by item, SKU, GTIN, merchant, location, category..." />
+        <span id="mini-spinner" class="mini-spinner" aria-hidden="true"></span>
+        <span id="load-status"></span>
       </div>
     </div>
+  <% } %>
 
-    <div class="filters">
-      <input
-        id="search"
-        placeholder="Search by item, SKU, GTIN, merchant, location, category..."
-      />
-    </div>
-  </div>
 </div>

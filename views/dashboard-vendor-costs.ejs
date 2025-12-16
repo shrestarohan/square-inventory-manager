@@ -4,26 +4,41 @@
   <meta charset="UTF-8" />
   <title>Vendor & Unit Cost</title>
   <link rel="stylesheet" href="/styles.css" />
+  <style>
+    /* --- Missing-data highlighting --- */
+    tr.missing-row { outline: 2px solid rgba(255, 92, 92, .35); }
+    tr.missing-row td { background: rgba(255, 92, 92, .06); }
+    .missing-cell input { border-color: rgba(255, 92, 92, .6) !important; box-shadow: 0 0 0 2px rgba(255, 92, 92, .12); }
+    .dirty-cell input { border-color: rgba(122, 162, 255, .7) !important; box-shadow: 0 0 0 2px rgba(122, 162, 255, .12); }
+
+    /* subtle row status */
+    .row-status { font-size: 12px; opacity: .8; white-space: nowrap; }
+    .row-status.ok { color: rgba(120, 220, 160, .95); }
+    .row-status.err { color: rgba(255, 140, 140, .95); }
+    .row-status.dirty { color: rgba(180, 190, 255, .95); }
+
+    /* button small */
+    .btn-save { padding: 6px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,.18); cursor: pointer; }
+    .btn-save:disabled { opacity: .6; cursor: not-allowed; }
+  </style>
 </head>
 <body>
-  <!-- Shared header with nav + user + filters -->
   <%- include('partials/header', {
     pageTitle: 'Vendor & Unit Cost',
-    currentView: 'vendorCosts',     // distinct view key for this page
-    merchants: merchants || [],     // safe defaults if you pass merchants from route
+    currentView: 'vendorCosts',
+    merchants: merchants || [],
     merchantId: null,
     merchant: null,
     activePage: 'dashboard-vendor-costs'
   }) %>
 
   <main>
-    <!-- Page description -->
     <section class="hint">
-      Manage vendor names and unit cost for each GTIN. Values are stored in Firestore and can be edited inline.
+      Manage vendor names and unit cost for each GTIN. Search queries Firestore. Press <b>Enter</b> to save a row, or tab out to auto-save.
     </section>
 
-    <section style="margin-top: 12px;">
-      <div id="status" class="status"></div>
+    <section style="margin-top:12px;">
+      <div id="status" class="status" style="min-height:18px;"></div>
 
       <table id="gtin-table">
         <thead>
@@ -35,225 +50,453 @@
             <th>Unit Cost</th>
             <th>Updated At</th>
             <th>Save</th>
+            <th>Status</th>
           </tr>
         </thead>
-        <tbody>
-          <tr>
-            <!-- 7 columns -->
-            <td colspan="7">Loading...</td>
-          </tr>
-        </tbody>
+        <tbody id="gtin-body"></tbody>
       </table>
 
-      <!-- Pagination controls -->
-      <div id="pagination" class="pagination" style="margin-top: 10px;"></div>
+      <div class="pagination" style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+        <span id="page-info"></span>
+        <button id="prevPage" type="button">Prev</button>
+        <button id="nextPage" type="button">Next</button>
+        <span style="margin-left:auto;">
+          Rows:
+          <select id="rowsPerPage">
+            <option value="25">25</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="250">250</option>
+          </select>
+        </span>
+      </div>
     </section>
   </main>
 
   <script>
+    // --- header controls ---
+    const viewSelect = document.getElementById('viewSelect');
+    if (viewSelect) viewSelect.addEventListener('change', () => {
+      const val = viewSelect.value;
+      if (val) window.location.href = val;
+    });
+
+    // --- loader elements from header.ejs ---
+    const topLoader = document.getElementById('top-loader');
+    const topLoaderBar = document.getElementById('top-loader-bar');
+    const miniSpinner = document.getElementById('mini-spinner');
+    const loadStatus = document.getElementById('load-status'); // keep blank
     const statusEl = document.getElementById('status');
 
-    // in-memory data + pagination state
-    let allData = [];
-    let filteredData = [];
-    let currentPage = 1;
-    const pageSize = 50; // rows per page
-
     function setStatus(msg) {
-      if (!statusEl) return;
-      statusEl.textContent = msg || '';
+      if (statusEl) statusEl.textContent = msg || '';
     }
 
-    function renderPagination(totalPages) {
-      const container = document.getElementById('pagination');
-      if (!container) return;
+    let loaderTimer = null;
+    function startLoading() {
+      if (loadStatus) loadStatus.textContent = '';
+      if (topLoader) topLoader.classList.add('is-on');
+      if (miniSpinner) miniSpinner.classList.add('is-on');
 
-      container.innerHTML = '';
+      if (topLoaderBar) topLoaderBar.style.width = '10%';
+      let p = 10;
 
-      if (!filteredData.length) {
-        container.textContent = 'No items to display.';
+      clearInterval(loaderTimer);
+      loaderTimer = setInterval(() => {
+        p = Math.min(p + Math.random() * 12, 92);
+        if (topLoaderBar) topLoaderBar.style.width = p.toFixed(0) + '%';
+      }, 180);
+    }
+
+    function stopLoading() {
+      clearInterval(loaderTimer);
+      loaderTimer = null;
+
+      if (topLoaderBar) topLoaderBar.style.width = '100%';
+      setTimeout(() => {
+        if (topLoader) topLoader.classList.remove('is-on');
+        if (miniSpinner) miniSpinner.classList.remove('is-on');
+        if (topLoaderBar) topLoaderBar.style.width = '0%';
+        if (loadStatus) loadStatus.textContent = '';
+      }, 180);
+    }
+
+    // --- table state ---
+    const tbody = document.getElementById('gtin-body');
+    const pageInfo = document.getElementById('page-info');
+    const prevBtn = document.getElementById('prevPage');
+    const nextBtn = document.getElementById('nextPage');
+    const rowsPerPageSelect = document.getElementById('rowsPerPage');
+    const searchInput = document.getElementById('search');
+
+    let rowsPerPage = 50;
+    let currentQuery = '';
+    let currentPageIndex = 0;
+
+    // cursor paging
+    let pages = [];          // pages[i] = { rows, nextCursor }
+    let cursors = [null];    // cursors[i] = cursor used to load page i
+    let inflight = null;
+
+    function renderSkeleton() {
+      tbody.innerHTML = '';
+      for (let i = 0; i < 10; i++) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td colspan="8" style="padding:14px;opacity:.55;">&nbsp;</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '')
+        .replaceAll('&','&amp;')
+        .replaceAll('<','&lt;')
+        .replaceAll('>','&gt;')
+        .replaceAll('"','&quot;')
+        .replaceAll("'","&#039;");
+    }
+
+    function normalizeStr(v){ return String(v ?? '').trim(); }
+    function isMissing(row){
+      // define "missing" however you want:
+      const gtin = normalizeStr(row.gtin || row.id);
+      const sku = normalizeStr(row.sku);
+      const itemName = normalizeStr(row.itemName);
+      const vendorName = normalizeStr(row.vendorName);
+      const unitCost = row.unitCost;
+
+      const missing = {
+        gtin: !gtin,
+        sku: !sku,
+        itemName: !itemName,
+        vendorName: !vendorName,
+        unitCost: (unitCost === null || unitCost === undefined || unitCost === '' || Number.isNaN(Number(unitCost)))
+      };
+
+      return missing;
+    }
+
+    function rowKey(row){
+      return (row.gtin || row.id || '').toString();
+    }
+
+    // Track original vs edited values per row on the page
+    const originalByGtin = new Map(); // gtin -> { sku,itemName,vendorName,unitCost }
+    const dirtyByGtin = new Set();
+
+    function markDirty(gtin, isDirty){
+      if (!gtin) return;
+      if (isDirty) dirtyByGtin.add(gtin);
+      else dirtyByGtin.delete(gtin);
+    }
+
+    function getRowOriginal(gtin){
+      return originalByGtin.get(gtin) || null;
+    }
+
+    function setRowOriginal(gtin, obj){
+      originalByGtin.set(gtin, { ...obj });
+    }
+
+    function isRowDirty(gtin, current){
+      const orig = getRowOriginal(gtin);
+      if (!orig) return false;
+      return (
+        normalizeStr(orig.sku) !== normalizeStr(current.sku) ||
+        normalizeStr(orig.itemName) !== normalizeStr(current.itemName) ||
+        normalizeStr(orig.vendorName) !== normalizeStr(current.vendorName) ||
+        String(orig.unitCost ?? '') !== String(current.unitCost ?? '')
+      );
+    }
+
+    function setRowStatus(tr, kind, text){
+      const el = tr.querySelector('.row-status');
+      if (!el) return;
+      el.classList.remove('ok','err','dirty');
+      if (kind) el.classList.add(kind);
+      el.textContent = text || '';
+    }
+
+    function updateMissingStyling(tr, missing){
+      // row outline if ANY missing
+      const anyMissing = Object.values(missing).some(Boolean);
+      tr.classList.toggle('missing-row', anyMissing);
+
+      // per-cell
+      const map = {
+        sku: 'sku',
+        itemName: 'itemName',
+        vendorName: 'vendorName',
+        unitCost: 'unitCost',
+      };
+
+      Object.entries(map).forEach(([field, dataField]) => {
+        const td = tr.querySelector(`td[data-td="${dataField}"]`);
+        if (!td) return;
+        td.classList.toggle('missing-cell', !!missing[field]);
+      });
+    }
+
+    function updateDirtyStyling(tr, gtin){
+      const isDirty = dirtyByGtin.has(gtin);
+      tr.querySelectorAll('td[data-td]')?.forEach(td => td.classList.toggle('dirty-cell', false));
+      if (!isDirty) return;
+
+      // mark all editable cells dirty lightly
+      ['sku','itemName','vendorName','unitCost'].forEach(f => {
+        const td = tr.querySelector(`td[data-td="${f}"]`);
+        if (td) td.classList.add('dirty-cell');
+      });
+      setRowStatus(tr, 'dirty', 'Edited (auto-save on blur / Enter)');
+    }
+
+    async function fetchPage(pageIndexToLoad) {
+      const cursor = cursors[pageIndexToLoad] || null;
+
+      const params = new URLSearchParams();
+      params.set('pageSize', String(rowsPerPage));
+      if (cursor) params.set('cursor', cursor);
+      if (currentQuery) params.set('q', currentQuery);
+
+      const url = '/api/gtin-meta?' + params.toString();
+
+      if (inflight) inflight.abort();
+      inflight = new AbortController();
+
+      startLoading();
+      const res = await fetch(url, { signal: inflight.signal, headers: { 'Accept': 'application/json' } });
+      if (!res.ok) throw new Error(await res.text());
+
+      const data = await res.json();
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      const nextCursor = data.nextCursor || null;
+
+      pages[pageIndexToLoad] = { rows, nextCursor };
+      cursors[pageIndexToLoad + 1] = nextCursor;
+
+      stopLoading();
+      return rows;
+    }
+
+    function getRowValuesFromTr(tr){
+      const sku = tr.querySelector('input[data-field="sku"]')?.value ?? '';
+      const itemName = tr.querySelector('input[data-field="itemName"]')?.value ?? '';
+      const vendorName = tr.querySelector('input[data-field="vendorName"]')?.value ?? '';
+      const unitCostVal = tr.querySelector('input[data-field="unitCost"]')?.value ?? '';
+      return {
+        sku,
+        itemName,
+        vendorName,
+        unitCost: unitCostVal === '' ? null : Number(unitCostVal),
+      };
+    }
+
+    async function saveRow(tr, row){
+      const gtin = rowKey(row);
+      if (!gtin) return;
+
+      const saveBtn = tr.querySelector('.btn-save');
+      const body = getRowValuesFromTr(tr);
+
+      // quick validation (optional)
+      if (body.unitCost !== null && (Number.isNaN(body.unitCost) || body.unitCost < 0)) {
+        setRowStatus(tr, 'err', 'Unit cost must be a valid number');
         return;
       }
 
-      if (totalPages <= 1) {
-        container.textContent = `Showing ${filteredData.length} item(s).`;
-        return;
+      saveBtn.disabled = true;
+
+      try {
+        startLoading();
+        setRowStatus(tr, 'dirty', 'Saving...');
+
+        const resp = await fetch('/api/gtin-meta/' + encodeURIComponent(gtin), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        const updated = await resp.json();
+        if (!resp.ok) throw new Error(updated.error || 'Save failed');
+
+        // update UI
+        tr.querySelector('.updatedAt').textContent = updated.updatedAt || '';
+        setStatus('Saved ' + gtin);
+        setRowStatus(tr, 'ok', 'Saved');
+
+        // sync local model + original snapshot
+        row.sku = body.sku;
+        row.itemName = body.itemName;
+        row.vendorName = body.vendorName;
+        row.unitCost = body.unitCost;
+        row.updatedAt = updated.updatedAt || row.updatedAt;
+
+        setRowOriginal(gtin, body);
+        markDirty(gtin, false);
+
+        // update missing highlight after save
+        updateMissingStyling(tr, isMissing(row));
+        updateDirtyStyling(tr, gtin);
+      } catch (e) {
+        console.error(e);
+        setStatus('Error saving ' + gtin + ': ' + e.message);
+        setRowStatus(tr, 'err', 'Save failed');
+      } finally {
+        stopLoading();
+        saveBtn.disabled = false;
       }
-
-      const info = document.createElement('span');
-      info.textContent = `Page ${currentPage} of ${totalPages} (${filteredData.length} item(s))`;
-      info.style.marginRight = '12px';
-
-      const prevBtn = document.createElement('button');
-      prevBtn.type = 'button';
-      prevBtn.textContent = 'Previous';
-      prevBtn.disabled = currentPage === 1;
-      prevBtn.style.marginRight = '6px';
-      prevBtn.addEventListener('click', () => {
-        if (currentPage > 1) {
-          currentPage -= 1;
-          renderTable();
-        }
-      });
-
-      const nextBtn = document.createElement('button');
-      nextBtn.type = 'button';
-      nextBtn.textContent = 'Next';
-      nextBtn.disabled = currentPage >= totalPages;
-      nextBtn.addEventListener('click', () => {
-        if (currentPage < totalPages) {
-          currentPage += 1;
-          renderTable();
-        }
-      });
-
-      container.appendChild(info);
-      container.appendChild(prevBtn);
-      container.appendChild(nextBtn);
     }
 
     function renderTable() {
-      const tbody = document.querySelector('#gtin-table tbody');
-      if (!tbody) return;
+      const page = pages[currentPageIndex] || { rows: [], nextCursor: null };
+      const rows = page.rows || [];
 
       tbody.innerHTML = '';
+      originalByGtin.clear();
+      dirtyByGtin.clear();
 
-      if (!filteredData.length) {
-        const trEmpty = document.createElement('tr');
-        trEmpty.innerHTML = '<td colspan="7">No GTIN metadata found.</td>';
-        tbody.appendChild(trEmpty);
-        renderPagination(1);
-        return;
-      }
-
-      const totalPages = Math.max(1, Math.ceil(filteredData.length / pageSize));
-      if (currentPage > totalPages) currentPage = totalPages;
-
-      const start = (currentPage - 1) * pageSize;
-      const end = start + pageSize;
-      const pageRows = filteredData.slice(start, end);
-
-      pageRows.forEach(row => {
+      if (!rows.length) {
         const tr = document.createElement('tr');
-        const gtin = row.gtin || row.id || '';
+        tr.innerHTML = `<td colspan="8">No GTIN metadata found.</td>`;
+        tbody.appendChild(tr);
+      } else {
+        rows.forEach((row) => {
+          const gtin = rowKey(row);
 
-        tr.innerHTML = `
-          <td>${gtin}</td>
-          <td><input value="${row.sku || ''}" data-field="sku" /></td>
-          <td><input value="${row.itemName || ''}" data-field="itemName" /></td>
-          <td><input value="${row.vendorName || ''}" data-field="vendorName" /></td>
-          <td><input type="number" step="0.01" value="${row.unitCost ?? ''}" data-field="unitCost" /></td>
-          <td>${row.updatedAt || ''}</td>
-          <td><button type="button">Save</button></td>
-        `;
+          // snapshot original values for dirty detection
+          setRowOriginal(gtin, {
+            sku: row.sku || '',
+            itemName: row.itemName || '',
+            vendorName: row.vendorName || '',
+            unitCost: row.unitCost ?? null,
+          });
 
-        const saveBtn = tr.querySelector('button');
-        saveBtn.addEventListener('click', async () => {
-          const sku = tr.querySelector('input[data-field="sku"]').value;
-          const itemName = tr.querySelector('input[data-field="itemName"]').value;
-          const vendorName = tr.querySelector('input[data-field="vendorName"]').value;
-          const unitCostVal = tr.querySelector('input[data-field="unitCost"]').value;
+          const tr = document.createElement('tr');
 
-          const body = {
-            sku,
-            itemName,
-            vendorName,
-            unitCost: unitCostVal === '' ? null : Number(unitCostVal),
-          };
+          tr.innerHTML = `
+            <td>${escapeHtml(gtin)}</td>
 
-          setStatus('Saving ' + gtin + ' ...');
+            <td data-td="sku"><input value="${escapeHtml(row.sku || '')}" data-field="sku" /></td>
+            <td data-td="itemName"><input value="${escapeHtml(row.itemName || '')}" data-field="itemName" /></td>
+            <td data-td="vendorName"><input value="${escapeHtml(row.vendorName || '')}" data-field="vendorName" /></td>
+            <td data-td="unitCost"><input type="number" step="0.01" value="${row.unitCost ?? ''}" data-field="unitCost" /></td>
 
-          try {
-            const resp = await fetch('/api/gtin-meta/' + encodeURIComponent(gtin), {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body),
+            <td class="updatedAt">${escapeHtml(row.updatedAt || '')}</td>
+            <td><button type="button" class="btn-save">Save</button></td>
+            <td><span class="row-status"></span></td>
+          `;
+
+          // missing highlight
+          updateMissingStyling(tr, isMissing(row));
+
+          // save button
+          const saveBtn = tr.querySelector('.btn-save');
+          saveBtn.addEventListener('click', () => saveRow(tr, row));
+
+          // Enter-to-save + blur auto-save
+          const inputs = Array.from(tr.querySelectorAll('input[data-field]'));
+
+          function maybeMarkDirtyAndUI(){
+            const current = getRowValuesFromTr(tr);
+            const dirty = isRowDirty(gtin, current);
+            markDirty(gtin, dirty);
+            updateDirtyStyling(tr, gtin);
+            if (!dirty) setRowStatus(tr, '', '');
+          }
+
+          inputs.forEach(inp => {
+            inp.addEventListener('input', () => {
+              maybeMarkDirtyAndUI();
             });
 
-            if (!resp.ok) {
-              setStatus('Error saving ' + gtin);
-              return;
-            }
+            inp.addEventListener('keydown', (ev) => {
+              if (ev.key === 'Enter') {
+                ev.preventDefault();
+                // only save if dirty
+                const current = getRowValuesFromTr(tr);
+                if (isRowDirty(gtin, current)) saveRow(tr, row);
+              }
+            });
 
-            const updated = await resp.json();
-            // update "Updated At" cell
-            tr.children[5].textContent = updated.updatedAt || '';
-            setStatus('Saved ' + gtin);
+            inp.addEventListener('blur', () => {
+              // auto-save if dirty
+              const current = getRowValuesFromTr(tr);
+              if (isRowDirty(gtin, current)) saveRow(tr, row);
+            }, { passive: true });
+          });
 
-            // keep in-memory data in sync
-            row.sku = sku;
-            row.itemName = itemName;
-            row.vendorName = vendorName;
-            row.unitCost = body.unitCost;
-            row.updatedAt = updated.updatedAt || row.updatedAt;
-          } catch (err) {
-            console.error(err);
-            setStatus('Error saving ' + gtin);
-          }
-        });
-
-        tbody.appendChild(tr);
-      });
-
-      renderPagination(totalPages);
-    }
-
-    function applyFilter(query) {
-      const q = (query || '').trim().toLowerCase();
-      if (!q) {
-        filteredData = allData.slice();
-      } else {
-        filteredData = allData.filter(row => {
-          const gtin = (row.gtin || row.id || '').toString().toLowerCase();
-          const sku = (row.sku || '').toString().toLowerCase();
-          const itemName = (row.itemName || '').toString().toLowerCase();
-          const vendorName = (row.vendorName || '').toString().toLowerCase();
-          return (
-            gtin.includes(q) ||
-            sku.includes(q) ||
-            itemName.includes(q) ||
-            vendorName.includes(q)
-          );
+          tbody.appendChild(tr);
         });
       }
-      currentPage = 1;
+
+      const hasNext = !!page.nextCursor;
+      prevBtn.disabled = currentPageIndex <= 0;
+      nextBtn.disabled = !hasNext;
+
+      const labelQ = currentQuery ? ` (search: "${currentQuery}")` : '';
+      pageInfo.textContent = `Page ${currentPageIndex + 1}${labelQ}`;
+    }
+
+    async function loadPage(pageIndex) {
+      currentPageIndex = pageIndex;
+
+      if (!pages[pageIndex]) {
+        renderSkeleton();
+        await fetchPage(pageIndex);
+      }
+
       renderTable();
     }
 
-    async function loadData() {
-      try {
-        setStatus('Loading...');
-        const res = await fetch('/api/gtin-meta');
-        if (!res.ok) {
-          setStatus('Failed to load data');
-          return;
-        }
-        const data = await res.json();
+    function resetAndReload() {
+      pages = [];
+      cursors = [null];
+      currentPageIndex = 0;
+      loadPage(0).catch((e) => {
+        console.error(e);
+        stopLoading();
+        tbody.innerHTML = '<tr><td colspan="8">Failed to load. Check server logs.</td></tr>';
+      });
+    }
 
-        // store full data set in memory
-        allData = Array.isArray(data) ? data : [];
-        filteredData = allData.slice();
-
-        setStatus('Loaded ' + allData.length + ' row(s).');
-
-        // hook up search once
-        const searchInput = document.getElementById('search');
-        if (searchInput && !searchInput.dataset.boundToVendorCosts) {
-          searchInput.dataset.boundToVendorCosts = 'true';
-          searchInput.addEventListener('input', () => {
-            applyFilter(searchInput.value);
-          });
-        }
-
-        // initial render (possibly with existing search query)
-        applyFilter(searchInput ? searchInput.value : '');
-      } catch (err) {
-        console.error(err);
-        setStatus('Error loading data');
+    // --- bind DB search ---
+    let searchDebounce = null;
+    if (searchInput) {
+      if (!searchInput.dataset.boundToVendorCostsDb2) {
+        searchInput.dataset.boundToVendorCostsDb2 = 'true';
+        searchInput.addEventListener('input', () => {
+          clearTimeout(searchDebounce);
+          searchDebounce = setTimeout(() => {
+            currentQuery = (searchInput.value || '').trim().toLowerCase();
+            resetAndReload();
+          }, 250);
+        });
       }
     }
 
-    loadData();
+    // --- pagination ---
+    prevBtn.addEventListener('click', () => {
+      if (currentPageIndex > 0) loadPage(currentPageIndex - 1);
+    });
+
+    nextBtn.addEventListener('click', () => {
+      const page = pages[currentPageIndex];
+      if (page && page.nextCursor) loadPage(currentPageIndex + 1);
+    });
+
+    rowsPerPageSelect.addEventListener('change', () => {
+      rowsPerPage = Number(rowsPerPageSelect.value) || 50;
+      resetAndReload();
+    });
+
+    // initial
+    rowsPerPage = Number(rowsPerPageSelect.value) || 50;
+    currentQuery = (searchInput?.value || '').trim().toLowerCase();
+    loadPage(0).catch((e) => {
+      console.error(e);
+      stopLoading();
+      tbody.innerHTML = '<tr><td colspan="8">Failed to load. Check server logs.</td></tr>';
+    });
   </script>
 </body>
 </html>

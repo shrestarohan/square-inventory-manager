@@ -1,9 +1,8 @@
 // scripts/syncSheetToFirestore.js
 require('dotenv').config();
 const { google } = require('googleapis');
-const { Firestore } = require('@google-cloud/firestore');
 
-const firestore = new Firestore();
+const firestore = require('../lib/firestore'); // or './lib/firestore' from root
 
 async function getSheetsClient() {
   const auth = new google.auth.GoogleAuth({

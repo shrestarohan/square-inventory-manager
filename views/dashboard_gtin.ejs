@@ -11,12 +11,12 @@
         currentView: 'gtin',
         merchant: null,
         merchantId: null,
-        merchants: typeof merchants !== 'undefined' ? merchants : []
+        merchants: typeof merchants !== 'undefined' ? merchants : [],
+        activePage: 'dashboard-gtin'   // ✅ IMPORTANT: match your header
       }) %>
 
-  <h1>Price Mismatch Dashboard</h1>
   <p class="hint">
-    Rows highlighted in red have different prices across Amigo Liquor, Once Upon A Bottle, and Liquor Island.
+    Rows highlighted have different prices across locations.
   </p>
 
   <table id="inventory-table">
@@ -26,12 +26,10 @@
         <th class="sortable" data-key="item_name" data-type="string">Item</th>
         <th class="sortable" data-key="category_name" data-type="string">Category</th>
         <th class="sortable" data-key="sku" data-type="string">SKU</th>
-        <!-- Location price columns added by JS -->
+        <!-- Location price columns injected by JS -->
       </tr>
     </thead>
-    <tbody id="inventory-body">
-      <!-- Rows rendered by JS -->
-    </tbody>
+    <tbody id="inventory-body"></tbody>
   </table>
 
   <div class="pagination">
@@ -52,40 +50,45 @@
   <%- include('partials/footer') %>
 
   <script>
-    // View selector (header)
+    // header view switch
     const viewSelect = document.getElementById('viewSelect');
-    if (viewSelect) {
-      viewSelect.addEventListener('change', () => {
-        const val = viewSelect.value;
-        if (val) {
-          window.location.href = val;
-        }
-      });
+    if (viewSelect) viewSelect.addEventListener('change', () => {
+      const val = viewSelect.value;
+      if (val) window.location.href = val;
+    });
+
+    // loader (from header.ejs)
+    const topLoader = document.getElementById('top-loader');
+    const topLoaderBar = document.getElementById('top-loader-bar');
+    const miniSpinner = document.getElementById('mini-spinner');
+
+    let loaderTimer = null;
+    function startLoading() {
+      if (topLoader) topLoader.classList.add('is-on');
+      if (miniSpinner) miniSpinner.classList.add('is-on');
+      if (topLoaderBar) topLoaderBar.style.width = '10%';
+
+      let p = 10;
+      clearInterval(loaderTimer);
+      loaderTimer = setInterval(() => {
+        p = Math.min(p + Math.random() * 12, 92);
+        if (topLoaderBar) topLoaderBar.style.width = p.toFixed(0) + '%';
+      }, 180);
     }
 
-    const rawRows = <%- JSON.stringify(rows || []) %>;
-    const locationKeys = <%- JSON.stringify(locations || []) %>;
+    function stopLoading() {
+      clearInterval(loaderTimer);
+      loaderTimer = null;
 
-    let allRows = rawRows.map((r, idx) => ({
-      _index: idx,
-      gtin: r.gtin || '',
-      item_name: r.item_name || '',
-      category_name: r.category_name || '',
-      sku: r.sku || '',
-      // {locKey: {price, currency, merchant_id, location_id, variation_id}}
-      pricesByLocation: r.pricesByLocation || {},
-    }));
+      if (topLoaderBar) topLoaderBar.style.width = '100%';
+      setTimeout(() => {
+        if (topLoader) topLoader.classList.remove('is-on');
+        if (miniSpinner) miniSpinner.classList.remove('is-on');
+        if (topLoaderBar) topLoaderBar.style.width = '0%';
+      }, 180);
+    }
 
-    let filteredRows = [...allRows];
-
-    let currentSort = {
-      key: null,
-      direction: 'asc',
-    };
-
-    let currentPage = 1;
-    let rowsPerPage = 50;
-
+    // table/paging
     const headerRow = document.getElementById('header-row');
     const tbody = document.getElementById('inventory-body');
     const pageInfo = document.getElementById('page-info');
@@ -94,74 +97,170 @@
     const nextBtn = document.getElementById('nextPage');
     const searchInput = document.getElementById('search');
 
-    // ---------- Build dynamic header columns (location prices) ----------
+    let locationKeys = [];
+    let headerBuilt = false;
 
-    locationKeys.forEach(locKey => {
-      const th = document.createElement('th');
-      th.textContent = locKey + ' (Price)';
-      headerRow.appendChild(th);
-    });
+    let pages = [];        // [{ rows, nextCursor }]
+    let cursors = [null];  // cursor for each page
+    let currentPageIndex = 0;
+    let rowsPerPage = Number(rowsPerPageSelect.value) || 50;
 
-    function getHeaderCells() {
-      return Array.from(
-        document.querySelectorAll('#inventory-table thead th.sortable')
-      );
+    let currentRows = [];
+    let currentSort = { key: null, direction: 'asc', type: 'string' };
+
+    let inflight = null;
+    let currentQuery = '';
+
+    function renderSkeleton() {
+      tbody.innerHTML = '';
+      for (let i = 0; i < 10; i++) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td colspan="${4 + (locationKeys?.length || 0)}" style="padding:14px;opacity:.35;">&nbsp;</td>`;
+        tbody.appendChild(tr);
+      }
     }
 
-    // ---------- Rendering ----------
+    function ensureHeader(locKeys) {
+      if (headerBuilt) return;
+      locationKeys = Array.isArray(locKeys) ? locKeys : [];
+      locationKeys.forEach(locKey => {
+        const th = document.createElement('th');
+        th.textContent = locKey + ' (Price)';
+        headerRow.appendChild(th);
+      });
+      headerBuilt = true;
+    }
+
+    function getHeaderCells() {
+      return Array.from(document.querySelectorAll('#inventory-table thead th.sortable'));
+    }
+
+    function clearSortIndicators() {
+      getHeaderCells().forEach(th => th.classList.remove('sorted-asc', 'sorted-desc'));
+    }
+
+    function sortBy(key, type) {
+      if (!key) return;
+      if (currentSort.key === key) {
+        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        currentSort.key = key;
+        currentSort.direction = 'asc';
+      }
+      currentSort.type = type || 'string';
+
+      clearSortIndicators();
+      getHeaderCells().forEach(th => {
+        if (th.dataset.key === key) {
+          th.classList.add(currentSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc');
+        }
+      });
+
+      renderTable();
+    }
+
+    async function fetchPage(pageIndexToLoad) {
+      const cursor = cursors[pageIndexToLoad] || null;
+
+      const params = new URLSearchParams();
+      params.set('pageSize', String(rowsPerPage));
+      if (cursor) params.set('cursor', cursor);
+      if (currentQuery) params.set('q', currentQuery);
+
+      const url = '/api/gtin-matrix?' + params.toString();
+
+      if (inflight) inflight.abort();
+      inflight = new AbortController();
+
+      startLoading();
+
+      const res = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: inflight.signal });
+      if (!res.ok) throw new Error(await res.text());
+
+      const data = await res.json();
+
+      // locations only needs to come once
+      if (!headerBuilt && data.locations) ensureHeader(data.locations);
+
+      const rows = (data.rows || []).map((r) => ({
+        gtin: r.gtin || '',
+        item_name: r.item_name || '',
+        category_name: r.category_name || '',
+        sku: r.sku || '',
+        pricesByLocation: r.pricesByLocation || {},
+      }));
+
+      pages[pageIndexToLoad] = { rows, nextCursor: data.nextCursor || null };
+      cursors[pageIndexToLoad + 1] = data.nextCursor || null;
+
+      stopLoading();
+      return rows;
+    }
+
+    async function loadPage(pageIndex) {
+      currentPageIndex = pageIndex;
+
+      if (!pages[pageIndex]) {
+        renderSkeleton();
+        await fetchPage(pageIndex);
+      }
+
+      currentRows = (pages[pageIndex]?.rows || []).slice();
+      renderTable();
+    }
+
+    function isMismatchRow(r) {
+      const prices = [];
+      for (const locKey of locationKeys) {
+        const info = r.pricesByLocation?.[locKey];
+        if (info && typeof info.price === 'number') prices.push(info.price);
+      }
+      if (prices.length <= 1) return false;
+      const first = prices[0];
+      return prices.some(p => Math.abs(p - first) > 0.0001);
+    }
 
     function renderTable() {
       tbody.innerHTML = '';
 
-      const total = filteredRows.length;
-      if (total === 0) {
-        const tr = document.createElement('tr');
-        const td = document.createElement('td');
-        td.colSpan = 4 + locationKeys.length;
-        td.textContent = 'No GTIN rows found.';
-        tr.appendChild(td);
-        tbody.appendChild(tr);
-        pageInfo.textContent = '0 of 0';
-        prevBtn.disabled = true;
-        nextBtn.disabled = true;
+      // sort current page only
+      if (currentSort.key) {
+        const { key, type, direction } = currentSort;
+        const dir = direction === 'asc' ? 1 : -1;
+
+        currentRows.sort((a, b) => {
+          const va = a[key];
+          const vb = b[key];
+          if (type === 'number') {
+            const na = (va == null || isNaN(va)) ? -Infinity : Number(va);
+            const nb = (vb == null || isNaN(vb)) ? -Infinity : Number(vb);
+            return na < nb ? -1 * dir : na > nb ? 1 * dir : 0;
+          } else {
+            const sa = (va ?? '').toString().toLowerCase();
+            const sb = (vb ?? '').toString().toLowerCase();
+            return sa < sb ? -1 * dir : sa > sb ? 1 * dir : 0;
+          }
+        });
+      }
+
+      if (!currentRows.length) {
+        tbody.innerHTML = `<tr><td colspan="${4 + locationKeys.length}">No GTIN rows found.</td></tr>`;
+        pageInfo.textContent = `Page ${currentPageIndex + 1} (0 rows)`;
+        prevBtn.disabled = currentPageIndex <= 0;
+        nextBtn.disabled = !(pages[currentPageIndex] && pages[currentPageIndex].nextCursor);
         return;
       }
 
-      const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
-      if (currentPage > totalPages) currentPage = totalPages;
-      const startIndex = (currentPage - 1) * rowsPerPage;
-      const endIndex = Math.min(startIndex + rowsPerPage, total);
-
-      for (let i = startIndex; i < endIndex; i++) {
-        const r = filteredRows[i];
-
-        // --- NEW: detect price mismatch across locations ---
-        const priceValues = [];
-        locationKeys.forEach(locKey => {
-          const info = r.pricesByLocation[locKey];
-          if (info && typeof info.price === 'number') {
-            priceValues.push(info.price);
-          }
-        });
-
-        let isMismatch = false;
-        if (priceValues.length > 1) {
-          const first = priceValues[0];
-          isMismatch = priceValues.some(p => p !== first);
-        }
-        // ---------------------------------------------------
-
+      for (const r of currentRows) {
         const tr = document.createElement('tr');
-        if (isMismatch) {
-          tr.classList.add('mismatch-row');
-        }
+        if (isMismatchRow(r)) tr.classList.add('mismatch-row');
 
-        // GTIN cell
+        // GTIN
         const tdGtin = document.createElement('td');
         tdGtin.textContent = r.gtin;
         tr.appendChild(tdGtin);
 
-        // Item name (editable master)
+        // Name editable
         const tdName = document.createElement('td');
         const nameInput = document.createElement('input');
         nameInput.type = 'text';
@@ -172,42 +271,33 @@
         tdName.appendChild(nameInput);
         tr.appendChild(tdName);
 
-        // Category cell
+        // Category
         const tdCat = document.createElement('td');
         tdCat.textContent = r.category_name || '';
         tr.appendChild(tdCat);
 
-        // SKU cell
+        // SKU
         const tdSku = document.createElement('td');
         tdSku.textContent = r.sku || '';
         tr.appendChild(tdSku);
 
-
-        // Price cells for each location (editable)
+        // Price cells
         locationKeys.forEach(locKey => {
           const td = document.createElement('td');
-          const info = r.pricesByLocation[locKey];
+          const info = r.pricesByLocation?.[locKey];
 
           if (info) {
             const input = document.createElement('input');
             input.type = 'number';
             input.step = '0.01';
             input.className = 'price-input';
+            if (info.price != null) input.value = Number(info.price).toFixed(2);
 
-            if (info.price != null) {
-              input.value = info.price.toFixed(2);
-            }
-
-            // Attach metadata for the API call
-            input.dataset.locationKey = locKey;
             input.dataset.merchantId = info.merchant_id || '';
-            input.dataset.locationId = info.location_id || '';
             input.dataset.variationId = info.variation_id || '';
             input.dataset.currency = info.currency || 'USD';
 
-            // When user changes price
             input.addEventListener('change', handlePriceChange);
-
             td.appendChild(input);
           } else {
             td.textContent = '';
@@ -219,132 +309,48 @@
         tbody.appendChild(tr);
       }
 
-      pageInfo.textContent = `Page ${currentPage} of ${Math.max(
-        1,
-        Math.ceil(total / rowsPerPage)
-      )}  (Total rows: ${total})`;
-
-      prevBtn.disabled = currentPage <= 1;
-      nextBtn.disabled = currentPage >= Math.ceil(total / rowsPerPage);
+      const hasNext = pages[currentPageIndex] && pages[currentPageIndex].nextCursor;
+      pageInfo.textContent = `Page ${currentPageIndex + 1} (rows: ${currentRows.length})`;
+      prevBtn.disabled = currentPageIndex <= 0;
+      nextBtn.disabled = !hasNext;
     }
 
-    // ---------- Sorting ----------
-
-    function clearSortIndicators() {
-      getHeaderCells().forEach(th => {
-        th.classList.remove('sorted-asc', 'sorted-desc');
-      });
-    }
-
-    function sortBy(key, type) {
-      if (!key) return;
-
-      if (currentSort.key === key) {
-        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
-      } else {
-        currentSort.key = key;
-        currentSort.direction = 'asc';
-      }
-
-      const dir = currentSort.direction === 'asc' ? 1 : -1;
-
-      filteredRows.sort((a, b) => {
-        const va = a[key];
-        const vb = b[key];
-
-        if (type === 'number') {
-          const na = (va === null || va === undefined || isNaN(va)) ? 0 : Number(va);
-          const nb = (vb === null || vb === undefined || isNaN(vb)) ? 0 : Number(vb);
-          if (na < nb) return -1 * dir;
-          if (na > nb) return 1 * dir;
-          return 0;
-        } else {
-          const sa = (va || '').toString().toLowerCase();
-          const sb = (vb || '').toString().toLowerCase();
-          if (sa < sb) return -1 * dir;
-          if (sa > sb) return 1 * dir;
-          return 0;
-        }
-      });
-
-      clearSortIndicators();
-      getHeaderCells().forEach(th => {
-        if (th.dataset.key === key) {
-          th.classList.add(
-            currentSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc'
-          );
-        }
-      });
-
-      currentPage = 1;
-      renderTable();
-    }
-
+    // sorting events
     getHeaderCells().forEach(th => {
-      th.addEventListener('click', () => {
-        const key = th.dataset.key;
-        const type = th.dataset.type || 'string';
-        sortBy(key, type);
+      th.addEventListener('click', () => sortBy(th.dataset.key, th.dataset.type || 'string'));
+    });
+
+    // DB-backed search (debounced)
+    let searchDebounce = null;
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        clearTimeout(searchDebounce);
+        searchDebounce = setTimeout(() => {
+          currentQuery = (searchInput.value || '').trim().toLowerCase();
+          pages = [];
+          cursors = [null];
+          currentPageIndex = 0;
+          loadPage(0);
+        }, 250);
       });
-    });
+    }
 
-    // ---------- Search ----------
-
-    searchInput.addEventListener('input', () => {
-      const q = searchInput.value.trim().toLowerCase();
-      if (!q) {
-        filteredRows = [...allRows];
-      } else {
-        filteredRows = allRows.filter(r => {
-          const baseTextParts = [
-            r.gtin,
-            r.item_name,
-            r.category_name,
-            r.sku,
-          ];
-
-          const priceTextParts = locationKeys.map(locKey => {
-            const info = r.pricesByLocation[locKey];
-            if (!info || info.price == null) return '';
-            return locKey + ' ' + info.price + ' ' + (info.currency || '');
-          });
-
-          return baseTextParts.concat(priceTextParts)
-            .join(' ')
-            .toLowerCase()
-            .includes(q);
-        });
-      }
-      currentPage = 1;
-      renderTable();
-    });
-
-    // ---------- Pagination controls ----------
-
+    // paging
     rowsPerPageSelect.addEventListener('change', () => {
       rowsPerPage = Number(rowsPerPageSelect.value) || 50;
-      currentPage = 1;
-      renderTable();
+      pages = [];
+      cursors = [null];
+      currentPageIndex = 0;
+      loadPage(0);
     });
 
-    prevBtn.addEventListener('click', () => {
-      if (currentPage > 1) {
-        currentPage--;
-        renderTable();
-      }
-    });
-
+    prevBtn.addEventListener('click', () => currentPageIndex > 0 && loadPage(currentPageIndex - 1));
     nextBtn.addEventListener('click', () => {
-      const total = filteredRows.length;
-      const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
-      if (currentPage < totalPages) {
-        currentPage++;
-        renderTable();
-      }
+      const page = pages[currentPageIndex];
+      if (page && page.nextCursor) loadPage(currentPageIndex + 1);
     });
 
-    // ---------- Price change handler ----------
-
+    // --- price update ---
     async function handlePriceChange(event) {
       const input = event.target;
       const newValue = input.value.trim();
@@ -353,21 +359,12 @@
       const variationId = input.dataset.variationId;
       const currency = input.dataset.currency || 'USD';
 
-      if (!merchantId || !variationId) {
-        alert('Missing merchant or variation information for this price.');
-        return;
-      }
-
-      if (!newValue) {
-        alert('Price cannot be empty.');
-        return;
-      }
+      if (!merchantId || !variationId) return alert('Missing merchant/variation info.');
 
       const numericPrice = Number(newValue);
-      if (Number.isNaN(numericPrice) || numericPrice < 0) {
-        alert('Enter a valid non-negative price.');
+      if (!newValue || Number.isNaN(numericPrice) || numericPrice < 0) {
         input.classList.add('price-error');
-        return;
+        return alert('Enter a valid non-negative price.');
       }
 
       input.disabled = true;
@@ -377,45 +374,32 @@
         const res = await fetch('/api/update-price', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            merchantId,
-            variationId,
-            price: numericPrice,
-            currency,
-          }),
+          body: JSON.stringify({ merchantId, variationId, price: numericPrice, currency }),
         });
-
         const data = await res.json();
-
-        if (!res.ok || !data.success) {
-          throw new Error(data.error || 'Failed to update price in Square');
-        }
+        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update price');
 
         input.classList.add('price-updated');
         setTimeout(() => input.classList.remove('price-updated'), 800);
       } catch (err) {
         console.error(err);
-        alert('Failed to update price: ' + err.message);
         input.classList.add('price-error');
+        alert('Failed to update price: ' + err.message);
       } finally {
         input.disabled = false;
       }
     }
 
+    // --- name update ---
     async function handleNameChange(event) {
       const input = event.target;
       const newName = input.value.trim();
       const gtin = input.dataset.gtin;
 
-      if (!gtin) {
-        alert('Missing GTIN for this row.');
-        return;
-      }
-
+      if (!gtin) return alert('Missing GTIN.');
       if (!newName) {
-        alert('Item name cannot be empty.');
         input.classList.add('name-error');
-        return;
+        return alert('Item name cannot be empty.');
       }
 
       input.disabled = true;
@@ -425,44 +409,33 @@
         const res = await fetch('/api/update-item-name', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            gtin,
-            itemName: newName,
-          }),
+          body: JSON.stringify({ gtin, itemName: newName }),
         });
-
         const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update item name');
 
-        if (!res.ok || !data.success) {
-          throw new Error(data.error || 'Failed to update item name');
-        }
-
-        // Update local data model so search/sort show the new name everywhere
-        allRows.forEach(r => {
-          if (r.gtin === gtin) {
-            r.item_name = newName;
-          }
-        });
-        filteredRows.forEach(r => {
-          if (r.gtin === gtin) {
-            r.item_name = newName;
-          }
-        });
-
+        // refresh current page visually (optional: re-fetch page)
         input.classList.add('name-updated');
         setTimeout(() => input.classList.remove('name-updated'), 800);
       } catch (err) {
         console.error(err);
-        alert('Failed to update item name: ' + err.message);
         input.classList.add('name-error');
+        alert('Failed to update item name: ' + err.message);
       } finally {
         input.disabled = false;
       }
     }
 
-    // ---------- Initial render ----------
-
-    renderTable();
+    // initial load
+    (async () => {
+      try {
+        await loadPage(0);
+      } catch (e) {
+        console.error(e);
+        stopLoading();
+        tbody.innerHTML = `<tr><td colspan="4">Failed to load. Check server logs.</td></tr>`;
+      }
+    })();
   </script>
 </body>
 </html>

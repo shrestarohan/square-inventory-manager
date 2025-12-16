@@ -1,8 +1,7 @@
 // scripts/cleanupInventoryItemNameField.js
 require('dotenv').config();
-const { Firestore, FieldValue } = require('@google-cloud/firestore');
 
-const firestore = new Firestore();
+const firestore = require('../lib/firestore'); // or './lib/firestore' from root
 
 // Defaults:
 // - MERCHANT_ID env var, or hard-coded ML1AH5AM3K151

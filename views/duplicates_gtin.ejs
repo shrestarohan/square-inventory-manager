@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Duplicate GTINs</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <%- include('partials/header', {
+        pageTitle: pageTitle || 'Duplicate GTINs',
+        currentView: 'duplicates',
+        merchant: null,
+        merchantId: null,
+        merchants: typeof merchants !== 'undefined' ? merchants : [],
+        activePage: 'duplicates-gtin'
+      }) %>
+
+  <div style="padding: 14px 16px;">
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <label><strong>Merchant:</strong></label>
+      <select id="merchantPick">
+        <option value="">Select merchant…</option>
+        <% (merchants || []).forEach(m => { %>
+          <option value="<%= m.id %>"><%= m.business_name || m.id %></option>
+        <% }) %>
+      </select>
+
+      <label style="display:flex;gap:6px;align-items:center;">
+        <input type="radio" name="mode" value="gtin" checked />
+        Duplicate GTIN (merchant-wide)
+      </label>
+
+      <label style="display:flex;gap:6px;align-items:center;">
+        <input type="radio" name="mode" value="gtin_location" />
+        Duplicate GTIN + location_id
+      </label>
+
+      <input id="filter" placeholder="Filter results (gtin, item, sku, location)..." style="min-width:320px;" />
+
+      <span id="summary" style="opacity:.8;font-size:12px;"></span>
+    </div>
+  </div>
+
+  <table id="dup-table" style="width:100%;">
+    <thead>
+      <tr>
+        <th>Count</th>
+        <th>GTIN</th>
+        <th>Location</th>
+        <th>Item</th>
+        <th>SKU</th>
+        <th>Category</th>
+      </tr>
+    </thead>
+    <tbody id="dup-body">
+      <tr><td colspan="6" style="padding:16px;opacity:.7;">Pick a merchant to load duplicates.</td></tr>
+    </tbody>
+  </table>
+
+  <%- include('partials/footer') %>
+
+  <script>
+    const topLoader = document.getElementById('top-loader');
+    const topLoaderBar = document.getElementById('top-loader-bar');
+    const miniSpinner = document.getElementById('mini-spinner');
+    const loadStatus = document.getElementById('load-status');
+
+    let timer = null;
+    function startLoading() {
+      if (topLoader) topLoader.classList.add('is-on');
+      if (miniSpinner) miniSpinner.classList.add('is-on');
+      if (loadStatus) loadStatus.textContent = ''; // no text
+      if (topLoaderBar) topLoaderBar.style.width = '10%';
+      let p = 10;
+      clearInterval(timer);
+      timer = setInterval(() => {
+        p = Math.min(p + Math.random() * 12, 92);
+        if (topLoaderBar) topLoaderBar.style.width = p.toFixed(0) + '%';
+      }, 180);
+    }
+    function stopLoading() {
+      clearInterval(timer);
+      timer = null;
+      if (topLoaderBar) topLoaderBar.style.width = '100%';
+      setTimeout(() => {
+        if (topLoader) topLoader.classList.remove('is-on');
+        if (miniSpinner) miniSpinner.classList.remove('is-on');
+        if (topLoaderBar) topLoaderBar.style.width = '0%';
+      }, 180);
+    }
+
+    const merchantPick = document.getElementById('merchantPick');
+    const filter = document.getElementById('filter');
+    const tbody = document.getElementById('dup-body');
+    const summary = document.getElementById('summary');
+
+    let lastData = null;
+
+    function getMode() {
+      const r = document.querySelector('input[name="mode"]:checked');
+      return r ? r.value : 'gtin';
+    }
+
+    function renderRows(data) {
+      const q = (filter.value || '').trim().toLowerCase();
+      const rows = (data.dupes || []).filter(r => {
+        if (!q) return true;
+        const t = [
+          r.gtin, r.location_id, r.location_name, r.item_name, r.sku, r.category_name
+        ].join(' ').toLowerCase();
+        return t.includes(q);
+      });
+
+      tbody.innerHTML = '';
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="padding:16px;opacity:.7;">No duplicates found.</td></tr>';
+        return;
+      }
+
+      for (const r of rows) {
+        const locText = r.location_name
+          ? `${r.location_name} (${r.location_id || ''})`
+          : (r.location_id || '');
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>${r.count}</strong></td>
+          <td>${r.gtin || ''}</td>
+          <td>${locText || ''}</td>
+          <td>${(r.item_name || '').replaceAll('<','&lt;')}</td>
+          <td>${r.sku || ''}</td>
+          <td>${r.category_name || ''}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function loadDupes() {
+      const merchantId = merchantPick.value;
+      const mode = getMode();
+      if (!merchantId) return;
+
+      startLoading();
+      try {
+        const params = new URLSearchParams();
+        params.set('merchantId', merchantId);
+        params.set('mode', mode);
+        params.set('top', '1000');
+
+        const res = await fetch('/api/gtin-duplicates?' + params.toString(), {
+          headers: { 'Accept': 'application/json' }
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed');
+
+        lastData = data;
+        summary.textContent =
+          `${data.merchantName} • total docs: ${data.totalDocs} • with GTIN: ${data.withGtin} • duplicate keys: ${data.dupes.length}`;
+
+        renderRows(data);
+      } catch (e) {
+        console.error(e);
+        tbody.innerHTML = `<tr><td colspan="6" style="padding:16px;color:#ffb3b3;">${e.message}</td></tr>`;
+      } finally {
+        stopLoading();
+      }
+    }
+
+    merchantPick.addEventListener('change', loadDupes);
+    document.querySelectorAll('input[name="mode"]').forEach(el => el.addEventListener('change', loadDupes));
+    filter.addEventListener('input', () => lastData && renderRows(lastData));
+  </script>
+</body>
+</html>

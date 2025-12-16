@@ -210,14 +210,14 @@ Example Sunday night automation (in cron or Cloud Scheduler):
 
    ```
 
-5. **(Optional) Cleanup column name itemName that was created by mistake**
+6. **(Optional) Cleanup column name itemName that was created by mistake**
 
    ```bash
    MERCHANT_ID=ML1AH5AM3K151 npm run cleanup:itemName-field
    MERCHANT_ID=ML1AH5AM3K151 DRY_RUN=false npm run cleanup:itemName-field
    ```
 
-5. **(Optional) Sync inventory DB from Sqaure to Firestore**
+7. **(Optional) Sync inventory DB from Square to Firestore**
 
   5a. Sync all merchants
    ```bash
@@ -227,6 +227,46 @@ Example Sunday night automation (in cron or Cloud Scheduler):
   5b. Sync one merchant only
    ```bash
    MERCHANT_ID=ML1AH5AM3K151 npm run sync:inventory
+
+   ```
+
+7. **(Optional) Sync inventory between merchants in Firestore**
+
+  Sync all merchants
+   ```bash
+   DRY_RUN=true npm run sync:inventory-coverage
+   DRY_RUN=false npm run sync:inventory-coverage
+   FIRESTORE_DATABASE_ID=default-clone-121125 DRY_RUN=true npm run sync:inventory-coverage
+   FIRESTORE_DATABASE_ID=default-clone-121125 DRY_RUN=false npm run sync:inventory-coverage
+   ```
+
+8. **(Optional) Sync inventory between merchants from Firestore to Square**
+
+  5a. Sync all merchants
+   ```bash
+   DRY_RUN=true npm run sync:missing-items-to-square
+   DRY_RUN=false npm run sync:missing-items-to-square
+   FIRESTORE_DATABASE_ID=default-clone-121125 npm run sync:missing-items-to-square
+   ```
+
+  5b. Sync one merchant only
+   ```bash
+   DRY_RUN=true MERCHANT_ID=ML1AH5AM3K151 npm run sync:missing-items-to-square
+   DRY_RUN=false MERCHANT_ID=ML1AH5AM3K151 npm run sync:missing-items-to-square
+   ```
+
+9. **(Optional) Rebuild master inventory in Firestore**
+
+  5a. Test on clone
+   ```bash
+   FIRESTORE_DATABASE_ID=default-clone-121125 DRY_RUN=true npm run rebuild:master-inventory
+   FIRESTORE_DATABASE_ID=default-clone-121125 DRY_RUN=false npm run rebuild:master-inventory
+   ```
+
+  5b. Test on default
+   ```bash
+   DRY_RUN=true npm run rebuild:master-inventory
+   DRY_RUN=false npm run rebuild:master-inventory
    ```
 
 ---

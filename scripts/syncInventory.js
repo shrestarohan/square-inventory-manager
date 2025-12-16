@@ -1,12 +1,12 @@
 // scripts/syncInventory.js
 require('dotenv').config();
-const { Firestore } = require('@google-cloud/firestore');
+
 const {
   syncAllMerchants,
   syncMerchantInventory,
 } = require('../lib/inventorySync');
 
-const firestore = new Firestore();
+const firestore = require('../lib/firestore'); // or './lib/firestore' from root
 
 // Allow filtering to one merchant:
 // - MERCHANT_ID env var

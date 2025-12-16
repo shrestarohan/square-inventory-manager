@@ -1,8 +1,7 @@
 // scripts/properCaseItemNames.js
 require('dotenv').config();
-const { Firestore } = require('@google-cloud/firestore');
 
-const firestore = new Firestore();
+const firestore = require('../lib/firestore'); // or './lib/firestore' from root
 
 const DRY_RUN = process.env.DRY_RUN === 'true';
 const SAMPLE_LIMIT = process.env.SAMPLE_LIMIT

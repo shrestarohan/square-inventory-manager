@@ -4,54 +4,240 @@
   <meta charset="UTF-8" />
   <title>Reports</title>
   <link rel="stylesheet" href="/styles.css" />
+  <style>
+    .hint { opacity: .9; }
+    .modebar { display:flex; align-items:center; gap:12px; margin-top:10px; flex-wrap:wrap; }
+    .modebar a { text-decoration:none; }
+    .pill {
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 10px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.18);
+      background: rgba(255,255,255,.06);
+      font-size:12px; opacity:.95;
+    }
+    .pill strong { font-weight:700; }
+    .muted { opacity:.7; font-size:12px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.10); vertical-align: top; }
+    th { text-align:left; font-weight:700; opacity:.9; }
+    .right { text-align:right; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
 </head>
 <body>
   <!-- Shared header with nav + user + filters -->
   <%- include('partials/header', {
     pageTitle: 'Reports',
-    currentView: 'reports',     // so header doesn't show the merchant dropdown
-    merchants: merchants || [], // safe defaults
+    currentView: 'reports',
+    merchants: merchants || [],
     merchantId: null,
     merchant: null,
-    activePage: 'reports'
+    activePage: 'reports',
+    user: typeof user !== 'undefined' ? user : null,
+    showFilters: false
   }) %>
 
   <main>
-    <!-- High-level metrics -->
+    <!-- Hint -->
     <section class="hint">
-      Summary of your inventory and pricing across all connected merchants.
+      Overview of inventory, GTIN, and data quality metrics for this Firestore database.
+      <div class="modebar">
+        <% if (lite) { %>
+          <span class="pill">
+            <strong>Fast Mode</strong> (default) — counts only, no deep scan
+          </span>
+          <a class="pill" href="/reports?full=1">Run Full Report</a>
+        <% } else { %>
+          <span class="pill">
+            <strong>Full Mode</strong> — includes detailed scan (slower)
+          </span>
+          <a class="pill" href="/reports">Back to Fast Mode</a>
+        <% } %>
+        <span class="muted">Generated: <span class="mono"><%= generatedAt || '' %></span></span>
+      </div>
     </section>
 
+    <!-- 1. Basic document counts -->
     <section style="margin-top: 12px;">
+      <h2 style="font-size: 16px; margin-bottom: 8px;">Collection Counts</h2>
       <table>
         <thead>
           <tr>
             <th>Metric</th>
-            <th>Value</th>
+            <th class="right">Count</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td>Total Merchants</td>
-            <td><%= (metrics && metrics.totalMerchants) || 0 %></td>
+            <td>Total Merchants (merchants)</td>
+            <td class="right"><%= (metrics && metrics.totalMerchants) || 0 %></td>
           </tr>
           <tr>
-            <td>Total Items (All Merchants)</td>
-            <td><%= (metrics && metrics.totalItems) || 0 %></td>
+            <td>Master Inventory Docs (inventory)</td>
+            <td class="right"><%= (metrics && metrics.masterInventoryCount) || 0 %></td>
           </tr>
           <tr>
-            <td>Items with GTIN</td>
-            <td><%= (metrics && metrics.itemsWithGtin) || 0 %></td>
+            <td>All Merchant Inventory Docs (collectionGroup inventory)</td>
+            <td class="right"><%= (metrics && metrics.merchantInventoryCount) || 0 %></td>
           </tr>
           <tr>
-            <td>Price Mismatch Count</td>
-            <td><%= (metrics && metrics.priceMismatchCount) || 0 %></td>
+            <td>GTIN Metadata Docs (gtinMeta)</td>
+            <td class="right"><%= (metrics && metrics.gtinMetaCount) || 0 %></td>
           </tr>
         </tbody>
       </table>
     </section>
 
-    <!-- Example: recent sync runs -->
+    <!-- 2. Data quality scoreboard (only meaningful in full mode) -->
+    <section style="margin-top: 20px;">
+      <h2 style="font-size: 16px; margin-bottom: 8px;">
+        Data Quality (Real Items Only)
+        <% if (lite) { %>
+          <span class="muted" style="margin-left:8px;">(Full mode only)</span>
+        <% } %>
+      </h2>
+
+      <% const dq = (metrics && metrics.dataQuality) || {}; %>
+      <table>
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th class="right">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Total Real Inventory Rows</td>
+            <td class="right"><%= (!lite && dq.totalRealItems) ? dq.totalRealItems : '-' %></td>
+          </tr>
+          <tr>
+            <td>GTIN Coverage</td>
+            <td class="right"><%= (!lite && dq.gtinCoveragePct != null) ? dq.gtinCoveragePct : '-' %><% if (!lite) { %>%<% } %></td>
+          </tr>
+          <tr>
+            <td>SKU Coverage</td>
+            <td class="right"><%= (!lite && dq.skuCoveragePct != null) ? dq.skuCoveragePct : '-' %><% if (!lite) { %>%<% } %></td>
+          </tr>
+          <tr>
+            <td>Cost Coverage (rows w/ unitCost in gtinMeta)</td>
+            <td class="right"><%= (!lite && dq.costCoveragePct != null) ? dq.costCoveragePct : '-' %><% if (!lite) { %>%<% } %></td>
+          </tr>
+          <tr>
+            <td>Image Coverage</td>
+            <td class="right"><%= (!lite && dq.imageCoveragePct != null) ? dq.imageCoveragePct : '-' %><% if (!lite) { %>%<% } %></td>
+          </tr>
+          <tr>
+            <td>Tax Coverage</td>
+            <td class="right"><%= (!lite && dq.taxCoveragePct != null) ? dq.taxCoveragePct : '-' %><% if (!lite) { %>%<% } %></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 3. Per-merchant metrics -->
+    <section style="margin-top: 20px;">
+      <h2 style="font-size: 16px; margin-bottom: 8px;">Per-Merchant Inventory Coverage</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Merchant</th>
+            <th class="right">Real Rows</th>
+            <th class="right">Synthetic Rows</th>
+            <th class="right">Distinct GTINs (All)</th>
+            <th class="right">Distinct GTINs (Real)</th>
+            <th class="right">Items Missing GTIN</th>
+            <th class="right">Items Missing SKU</th>
+            <th class="right">Items With Image</th>
+            <th class="right">Items With Tax</th>
+            <th class="right">Est. Inventory Value</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          <% if (lite) { %>
+            <% if (metrics && metrics.perMerchantLite && metrics.perMerchantLite.length) { %>
+              <% metrics.perMerchantLite.forEach(m => { %>
+                <tr>
+                  <td><%= m.merchantName || m.merchantId %></td>
+                  <td class="right" colspan="8">Fast mode (no deep scan)</td>
+                  <td class="right">
+                    <% if (m.inventoryDocCount != null) { %>
+                      <%= m.inventoryDocCount %> docs
+                    <% } else { %>
+                      Error: <%= m.error || 'unknown' %>
+                    <% } %>
+                  </td>
+                </tr>
+              <% }) %>
+            <% } else { %>
+              <tr>
+                <td colspan="10">No merchant metrics available.</td>
+              </tr>
+            <% } %>
+          <% } else { %>
+            <% if (metrics && metrics.perMerchant && metrics.perMerchant.length) { %>
+              <% metrics.perMerchant.forEach(m => { %>
+                <tr>
+                  <td><%= m.merchantName || m.merchantId %></td>
+                  <td class="right"><%= m.realCount || 0 %></td>
+                  <td class="right"><%= m.syntheticCount || 0 %></td>
+                  <td class="right"><%= m.distinctGtinsTotal || 0 %></td>
+                  <td class="right"><%= m.distinctGtinsReal || 0 %></td>
+                  <td class="right"><%= m.itemsMissingGtin || 0 %></td>
+                  <td class="right"><%= m.itemsMissingSku || 0 %></td>
+                  <td class="right"><%= m.itemsWithImage || 0 %></td>
+                  <td class="right"><%= m.itemsWithTax || 0 %></td>
+                  <td class="right">
+                    <% if (m.estInventoryValue != null) { %>
+                      $<%= Number(m.estInventoryValue).toFixed(2) %>
+                    <% } else { %>
+                      -
+                    <% } %>
+                  </td>
+                </tr>
+              <% }) %>
+            <% } else { %>
+              <tr>
+                <td colspan="10">No merchant metrics available.</td>
+              </tr>
+            <% } %>
+          <% } %>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 4. Pricing mismatch summary (Full mode only) -->
+    <% if (!lite) { %>
+      <section style="margin-top: 20px;">
+        <h2 style="font-size: 16px; margin-bottom: 8px;">Pricing Consistency Across Merchants</h2>
+        <% const pr = (metrics && metrics.pricing) || {}; %>
+        <table>
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th class="right">Count</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>GTINs with any price mismatch (min ≠ max)</td>
+              <td class="right"><%= pr.gtinsWithAnyMismatch || 0 %></td>
+            </tr>
+            <tr>
+              <td>GTINs with price spread ≥ $1.00</td>
+              <td class="right"><%= pr.gtinsWithSpreadOver1 || 0 %></td>
+            </tr>
+            <tr>
+              <td>GTINs with price spread ≥ $3.00</td>
+              <td class="right"><%= pr.gtinsWithSpreadOver3 || 0 %></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    <% } %>
+
+    <!-- 5. Recent sync runs -->
     <section style="margin-top: 20px;">
       <h2 style="font-size: 16px; margin-bottom: 8px;">Recent Inventory Sync Runs</h2>
       <table>
@@ -59,8 +245,8 @@
           <tr>
             <th>Run Time</th>
             <th>Status</th>
-            <th>Merchants Updated</th>
-            <th>Items Processed</th>
+            <th class="right">Merchants Updated</th>
+            <th class="right">Items Processed</th>
           </tr>
         </thead>
         <tbody>
@@ -69,8 +255,8 @@
               <tr>
                 <td><%= run.runAt || '' %></td>
                 <td><%= run.status || '' %></td>
-                <td><%= run.merchantsUpdated || 0 %></td>
-                <td><%= run.itemsProcessed || 0 %></td>
+                <td class="right"><%= run.merchantsUpdated || 0 %></td>
+                <td class="right"><%= run.itemsProcessed || 0 %></td>
               </tr>
             <% }) %>
           <% } else { %>

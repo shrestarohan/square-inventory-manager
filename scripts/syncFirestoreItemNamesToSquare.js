@@ -1,12 +1,12 @@
 // scripts/syncFirestoreItemNamesToSquare.js
 require('dotenv').config();
-const { Firestore } = require('@google-cloud/firestore');
+
 const {
     createSquareClient,
     buildCatalogMaps,
 } = require('../lib/inventorySync');
 
-const firestore = new Firestore();
+const firestore = require('../lib/firestore'); // or './lib/firestore' from root
 
 const DRY_RUN =
     (process.env.DRY_RUN || '').toLowerCase() === 'true';

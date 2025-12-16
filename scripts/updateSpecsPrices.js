@@ -1,8 +1,7 @@
 // scripts/updateSpecsPrices.js
 require('dotenv').config();
-const { Firestore } = require('@google-cloud/firestore');
 
-const firestore = new Firestore();
+const firestore = require('../lib/firestore'); // or './lib/firestore' from root
 
 // TODO: adjust this to however Specs search actually works.
 // Many WooCommerce shops use ?s=<query>&post_type=product
