@@ -5,6 +5,7 @@
 #   ./deploy-square-inventory-sync.sh YOUR_PROJECT_ID [REGION]
 #
 # Example:
+#   ./deploy-square-inventory-sync.sh square-inventory-480509 us-central1
 #   ./deploy-square-inventory-sync.sh my-gcp-project us-central1
 
 set -e
@@ -47,5 +48,20 @@ gcloud run deploy "${SERVICE_NAME}" \
   --memory=1Gi \
   --concurrency=10 \
   --set-env-vars="${ENV_VARS}"
+  
 
-echo "Done."
+echo "Deployed ${SERVICE_NAME} with APP_VERSION=${TAG}"
+
+echo "Switching traffic to latest revision..."
+LATEST_REVISION="$(gcloud run services describe "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --format='value(status.latestReadyRevisionName)')"
+
+echo "Latest ready revision: ${LATEST_REVISION}"
+
+gcloud run services update-traffic "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --to-revisions "${LATEST_REVISION}=100"
+
+echo "Traffic switched to: ${LATEST_REVISION}"
+

@@ -1,3 +1,59 @@
-<footer class="footer">
-  <span>Square Inventory Sync &middot; v1</span>
+<footer class="app-footer">
+  <div class="app-footer__inner">
+    <div class="app-footer__left">
+      <span class="app-footer__brand">Square Inventory Sync</span>
+      <span class="app-footer__sep">•</span>
+      <span class="app-footer__muted">
+        Environment: <strong><%= appEnv %></strong>
+      </span>
+      <span class="app-footer__sep">•</span>
+      <span class="app-footer__muted">
+        DB: <strong>default</strong>
+      </span>
+    </div>
+
+    <div class="app-footer__right">
+      <span class="app-footer__muted">v1.0.0</span>
+      <span class="app-footer__sep">•</span>
+      <span class="app-footer__muted">© 2025 Nash Technology</span>
+    </div>
+  </div>
 </footer>
+
+<style>
+  .app-footer{
+    margin-top: 18px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    background: rgb(133 165 233 / 45%);
+    backdrop-filter: blur(8px);
+  }
+  .app-footer__inner{
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .app-footer__left,
+  .app-footer__right{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .app-footer__brand{
+    font-weight: 700;
+    letter-spacing: .2px;
+  }
+  .app-footer__muted{
+    opacity: .75;
+    font-size: 12px;
+  }
+  .app-footer__sep{
+    opacity: .35;
+    font-size: 12px;
+  }
+</style>

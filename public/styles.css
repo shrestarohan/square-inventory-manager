@@ -3,6 +3,7 @@ body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   padding: 16px;
   background: #fafafa;
+  color: #111;
 }
 
 h1 {
@@ -48,6 +49,7 @@ h1 {
   border-radius: 999px;
   font-size: 0.95rem;
   border: 1px solid transparent;
+  color: inherit;
 }
 
 .nav-link:hover {
@@ -101,8 +103,17 @@ select {
 
 .filters input {
   width: 360px;
-  padding: 4px 6px;
+  padding: 6px 10px;
   font-size: 13px;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 10px;
+  background: #fff;
+  outline: none;
+}
+
+.filters input:focus{
+  border-color: rgba(0,113,227,0.6);
+  box-shadow: 0 0 0 3px rgba(0,113,227,0.15);
 }
 
 /* Table styles */
@@ -163,14 +174,22 @@ tbody tr:hover {
 }
 
 .pagination button {
-  padding: 3px 8px;
+  padding: 6px 10px;
   font-size: 12px;
   cursor: pointer;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 10px;
+  background: #fff;
 }
 
+.pagination button:hover{ background:#f5f5f5; }
+
 .pagination select {
-  padding: 2px 4px;
+  padding: 4px 6px;
   font-size: 12px;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 10px;
+  background:#fff;
 }
 
 .pagination span {
@@ -261,3 +280,170 @@ tbody tr:hover {
   cursor:pointer;
 }
 .btn-danger:disabled{ opacity:.6; cursor:not-allowed; }
+
+/* ==========================================================
+   Apple-style header overrides (keep at BOTTOM of file)
+   ========================================================== */
+
+/* Top loading bar */
+.top-loader{
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  z-index: 9999;
+  background: rgba(0,0,0,0.06);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s ease;
+}
+.top-loader.is-on{ opacity: 1; }
+.top-loader__bar{
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #0071e3, #66a9ff);
+  transition: width .2s ease;
+}
+
+/* Make sticky bar flush with body padding */
+.top-bar{
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+
+  /* pull header to edges to cancel body padding */
+  margin: -16px -16px 12px;
+  padding: 12px 16px;
+
+  background: rgba(250, 250, 252, 0.86);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+  gap: 10px;
+}
+
+/* tighter row spacing */
+.top-row{
+  gap: 12px;
+}
+
+/* brand stack */
+.app-brand{
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.app-brand__title{
+  font-size: 18px;     /* was 14px */
+  font-weight: 800;
+  letter-spacing: .2px;
+  color: #111;
+  line-height: 1.15;
+}
+
+.app-brand__subtitle{
+  font-size: 13px;     /* was 12px */
+  color: rgba(17,17,17,0.65);
+  max-width: 820px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* nav like apple: clean + underline active */
+.top-row-nav{
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.main-nav{
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.nav-link{
+  border: none;
+  background: transparent;
+  padding: 6px 2px;
+  border-radius: 0;
+  font-size: 12.5px;
+  color: rgba(17,17,17,0.75);
+}
+
+.nav-link:hover{
+  background: transparent;
+  color: rgba(17,17,17,0.95);
+}
+
+.nav-link.active{
+  background: transparent;
+  font-weight: 600;
+  color: rgba(17,17,17,0.95);
+  position: relative;
+}
+
+.nav-link.active::after{
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -6px;
+  height: 2px;
+  background: #0071e3;
+  border-radius: 2px;
+}
+
+/* filters compact */
+.filters input{
+  width: 340px;
+}
+
+/* spinner visible on light header */
+.mini-spinner{
+  display:inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0,0,0,.18);
+  border-top-color: rgba(0,0,0,.65);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  vertical-align: -2px;
+  margin-left: 8px;
+  visibility: hidden;
+}
+.mini-spinner.is-on{ visibility: visible; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#load-status{
+  margin-left: 10px;
+  font-size: 12px;
+  color: rgba(0,0,0,.55);
+  white-space: nowrap;
+}
+
+/* Header brand stack */
+.brand-stack{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+
+.brand-title{
+  margin:0;
+  font-size:22px;      /* <-- bigger */
+  font-weight:800;
+  letter-spacing:.2px;
+  line-height:1.15;
+  color:#111;
+}
+
+.brand-subtitle{
+  margin:0;
+  font-size:13px;
+  color:rgba(17,17,17,.65);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:900px;
+}

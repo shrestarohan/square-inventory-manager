@@ -3,64 +3,30 @@
   <div id="top-loader-bar" class="top-loader__bar"></div>
 </div>
 
-<style>
-  .top-loader{
-    position: fixed; top: 0; left: 0; right: 0;
-    height: 3px; z-index: 9999;
-    background: rgba(255,255,255,0.08);
-    opacity: 0; pointer-events: none;
-    transition: opacity .15s ease;
-  }
-  .top-loader.is-on{ opacity: 1; }
-  .top-loader__bar{
-    height: 100%;
-    width: 0%;
-    background: linear-gradient(90deg, #4f7cff, #7aa2ff);
-    transition: width .2s ease;
-  }
-
-  .mini-spinner{
-    display:inline-block; width: 14px; height: 14px;
-    border: 2px solid rgba(255,255,255,.25);
-    border-top-color: rgba(255,255,255,.9);
-    border-radius: 50%;
-    animation: spin .8s linear infinite;
-    vertical-align: -2px;
-    margin-left: 8px;
-    visibility: hidden;
-  }
-  .mini-spinner.is-on{ visibility: visible; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* small status text near search */
-  #load-status{
-    margin-left: 10px;
-    font-size: 12px;
-    opacity: .75;
-    white-space: nowrap;
-  }
-</style>
-
 <div class="top-bar">
   <!-- Row 1: Title (left) + User/Logout (right) -->
   <div class="top-row top-row-main">
     <div class="nav-title">
-      <h1>
-        <%= pageTitle || 'Inventory Dashboard' %>
-        <% if (currentView === 'item' && merchant && merchant.business_name) { %>
-          – <%= merchant.business_name %>
-        <% } else if (currentView === 'item') { %>
-          – All Merchants
-        <% } else if (currentView === 'gtin') { %>
-          – GTIN Master
-        <% } %>
-      </h1>
+      <div class="brand-stack">
+        <p class="brand-title">Square Inventory Sync</p>
+        <p class="brand-subtitle">
+          <%= pageTitle || 'Inventory Dashboard' %>
+          <% if (currentView === 'item' && merchant && merchant.business_name) { %>
+            – <%= merchant.business_name %>
+          <% } else if (currentView === 'item') { %>
+            – All Merchants
+          <% } else if (currentView === 'gtin') { %>
+            – GTIN Master
+          <% } %>
+        </p>
+      </div>
     </div>
 
     <div class="nav-user">
-      <% if (user) { %>
+      <% const safeUser = (typeof user !== 'undefined') ? user : null; %>
+      <% if (safeUser) { %>
         <span class="user-info">
-          Logged in as <strong><%= user.email %></strong>
+          Logged in as <strong><%= safeUser.email %></strong>
         </span>
         <form action="/logout" method="POST" class="logout-form">
           <button type="submit" class="btn btn-sm btn-outline-danger">
@@ -93,17 +59,17 @@
       <a href="/dashboard-vendor-costs" class="nav-link <%= activePage === 'dashboard-vendor-costs' ? 'active' : '' %>">
         Item Vendor and Costs
       </a>
-      
+
       <a href="/duplicates-gtin" class="nav-link <%= activePage === 'duplicates-gtin' ? 'active' : '' %>">
         Duplicate GTINs
       </a>
     </nav>
   </div>
 
-  <% const hideFilters = (typeof showFilters !== 'undefined') ? !showFilters : false; %>
+  <% var hideFilters = (typeof showFilters !== 'undefined') ? !showFilters : false; %>
 
   <% if (!hideFilters) { %>
-    <!-- Row 3: Filters (merchant + view + search) -->
+    <!-- Row 3: Filters (merchant + search) -->
     <div class="top-row top-row-filters">
       <div class="nav-left">
         <% if (currentView === 'item') { %>
@@ -123,21 +89,6 @@
             </select>
           </div>
         <% } %>
-
-        <div class="nav-block">
-          <label for="viewSelect"><strong>View:</strong></label>
-          <select id="viewSelect">
-            <option value="/dashboard" <%= currentView === 'item' ? 'selected' : '' %>>
-              Per Item / Per Merchant
-            </option>
-            <option value="/dashboard-gtin" <%= currentView === 'gtin' ? 'selected' : '' %>>
-              GTIN Master (Price by Location)
-            </option>
-            <option value="/dashboard-vendor-costs" <%= currentView === 'vendorCosts' ? 'selected' : '' %>>
-              Vendor &amp; Unit Cost
-            </option>
-          </select>
-        </div>
       </div>
 
       <div class="filters" style="display:flex;align-items:center;gap:8px;">
@@ -147,5 +98,4 @@
       </div>
     </div>
   <% } %>
-
 </div>

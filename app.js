@@ -40,6 +40,12 @@ app.use(
 // static files
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.use((req, res, next) => {
+  res.locals.appEnv = process.env.APP_ENV || process.env.NODE_ENV || 'dev';
+  next();
+});
+
+
 // --- Config from environment (coming from Secret Manager via Cloud Run) ---
 const SQUARE_APP_ID = process.env.SQUARE_APP_ID;
 const SQUARE_APP_SECRET = process.env.SQUARE_APP_SECRET;
