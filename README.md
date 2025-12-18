@@ -88,8 +88,24 @@ Use `DRY_RUN=true` and `SAMPLE_LIMIT=NN` for safe testing; see **DOCS.md** for e
 
 ---
 
+# Schedule it to run every night (Cloud Scheduler)
+
+Pick a time (say 2:00 AM Central). That’s America/Chicago timezone.
+Run this once from your terminal (in the same GCP project):
+
+```bash
+gcloud scheduler jobs create http nightly-inventory-gtin-sync \
+  --schedule="0 2 * * *" \
+  --time-zone="America/Chicago" \
+  --http-method=GET \
+  --uri="https://square-inventory-sync-976955084378.us-central1.run.app/tasks/full-nightly-sync"
+```
+
+---
+
 ## Full Documentation
 
 For detailed setup, script internals, batching, and common error fixes, read:
 
 ➡️ **[DOCS.md](./DOCS.md)**
+

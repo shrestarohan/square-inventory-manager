@@ -12,10 +12,17 @@ const path = require('path');
 // Use the legacy Square client for now (simpler with Node.js CommonJS)
 const { Client, Environment } = require('square/legacy');
 const { syncAllMerchants } = require('./lib/inventorySync');
+const { runBuildGtinMatrix } = require('./scripts/buildGtinMatrix');
 
 const firestore = require('./lib/firestore'); // or './lib/firestore' from root
 
 const app = express();
+app.use((req, res, next) => {
+  console.log('REQ:', req.method, req.originalUrl);
+  next();
+});
+
+app.locals.firestore = firestore;
 
 // Behind Cloud Run / proxy
 app.set('trust proxy', 1);
@@ -37,6 +44,7 @@ app.use(
   })
 );
 
+
 // static files
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -45,6 +53,21 @@ app.use((req, res, next) => {
   next();
 });
 
+// Middleware to load last full sync status for all views
+app.use(async (req, res, next) => {
+  try {
+    const doc = await firestore
+      .collection('meta')
+      .doc('sync_status')
+      .get();
+
+    res.locals.syncStatus = doc.exists ? doc.data() : null;
+  } catch (e) {
+    console.error('Error loading sync_status meta doc:', e);
+    res.locals.syncStatus = null;
+  }
+  next();
+});
 
 // --- Config from environment (coming from Secret Manager via Cloud Run) ---
 const SQUARE_APP_ID = process.env.SQUARE_APP_ID;
@@ -160,6 +183,83 @@ function requireLogin(req, res, next) {
   const nextUrl = encodeURIComponent(req.originalUrl || '/dashboard');
   return res.redirect(`/login?next=${nextUrl}`);
 }
+
+const comingSoon = require('./routes/comingSoon');
+
+const inventoryIntegrityRoutes = require('./routes/inventoryIntegrityRoutes');
+app.use('/api', requireLogin, inventoryIntegrityRoutes);
+
+app.get('/inventory-integrity', requireLogin, async (req, res) => {
+  const merchantsSnap = await firestore.collection('merchants').get();
+  const merchants = merchantsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  res.render('inventory-integrity', {
+    merchants,
+    merchantId: null,
+    merchant: null,
+  });
+});
+
+const reorderRoutes = require('./routes/reorderRoutes');
+app.use('/api', requireLogin, inventoryIntegrityRoutes);
+
+app.get('/reorder', requireLogin, comingSoon('Reorder Recommendations'));
+/*
+app.get('/reorder', requireLogin, async (req, res) => {
+  const merchantsSnap = await firestore.collection('merchants').get();
+  const merchants = merchantsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  // easiest v1: build locations list from Square locations of selected merchant
+  // For now, pass empty array and we’ll add /api/locations next if needed.
+  res.render('reorder', {
+    merchants,
+    merchantId: null,
+    merchant: null,
+    locations: [], // we'll fill this next
+    activePage: 'reorder',
+  });
+});*/
+
+app.get('/reorder/:merchantId', requireLogin, async (req, res) => {
+  const { merchantId } = req.params;
+
+  const merchantDoc = await firestore.collection('merchants').doc(merchantId).get();
+  if (!merchantDoc.exists) return res.status(404).send('Merchant not found');
+
+  const merchantsSnap = await firestore.collection('merchants').get();
+  const merchants = merchantsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  // quick locations list from your location_index (if you store locKey = merchant|location)
+  const locSnap = await firestore.collection('location_index').get();
+  const locations = locSnap.docs
+    .map(d => d.data())
+    .filter(x => (x.merchant_id === merchantId) || (x.locKey || '').startsWith(merchantId + '|'))
+    .map(x => ({
+      location_id: x.location_id || (x.locKey ? x.locKey.split('|')[1] : ''),
+      location_name: x.location_name || x.location_id || '',
+    }))
+    .filter(x => x.location_id);
+
+  res.render('reorder', {
+    merchants,
+    merchantId,
+    merchant: merchantDoc.data(),
+    locations,
+    activePage: 'reorder',
+  });
+});
+
+const { syncSalesDailyForMerchant } = require('./scripts/syncSalesDaily');
+
+app.get('/tasks/sync-sales-daily/:merchantId', requireLogin, async (req, res) => {
+  try {
+    const out = await syncSalesDailyForMerchant({ merchantId: req.params.merchantId, days: 28 });
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 
 // Login screen
 app.get('/login', (req, res) => {
@@ -736,8 +836,30 @@ app.post('/tasks/sync-inventory', async (req, res) => {
   }
 });
 
+// Full nightly job: sync inventory from Square, then rebuild GTIN matrix
+app.get('/tasks/full-nightly-sync', async (req, res) => {
+  try {
+    console.log('Nightly job: starting syncAllMerchants...');
+    await syncAllMerchants();
+    console.log('Nightly job: syncAllMerchants done. Starting runBuildGtinMatrix...');
+
+    await runBuildGtinMatrix(); // uses defaults (all inventory)
+
+    console.log('Nightly job: GTIN matrix rebuild done.');
+    res.status(200).send('✅ Nightly sync + GTIN matrix rebuild completed');
+
+    await firestore.collection('meta').doc('sync_status').set({
+      last_full_sync_at: new Date().toISOString(),
+      last_full_sync_run_id: runId,
+    }, { merge: true });
+
+  } catch (err) {
+    console.error('Error in /tasks/full-nightly-sync', err);
+    res.status(500).send('Nightly job failed: ' + (err.message || String(err)));
+  }
+});
+
 // GTIN master dashboard (FAST shell render)
-// No big Firestore reads here.
 app.get('/dashboard-gtin', requireLogin, async (req, res) => {
   try {
     const merchantsSnap = await firestore.collection('merchants').get();
@@ -746,15 +868,14 @@ app.get('/dashboard-gtin', requireLogin, async (req, res) => {
     res.render('dashboard_gtin', {
       merchants,
       pageTitle: 'Price Mismatch Dashboard',
-      activePage: 'dashboard-gtin',   // ✅ must match header.ejs
-      // rows/locations NOT passed anymore
+      activePage: 'dashboard-gtin',  
+      query: req.query
     });
   } catch (err) {
     console.error('Error loading /dashboard-gtin:', err);
     res.status(500).send('Failed to load page: ' + err.message);
   }
 });
-
 
 app.post('/api/update-price', async (req, res) => {
   try {
@@ -1009,7 +1130,7 @@ app.get('/api/gtin-meta', requireLogin, async (req, res) => {
     const cursor = req.query.cursor || null;
 
     const qRaw = (req.query.q || '').trim();
-    const q = qRaw.toLowerCase();
+    const q = qRaw.toLowerCase().replace(/\s+/g, ''); // ✅ normalize: "375 ml" -> "375ml"
 
     const colRef = firestore.collection('gtinMeta');
 
@@ -1309,10 +1430,10 @@ app.get('/api/inventory', requireLogin, async (req, res) => {
     const pageSize = Math.min(Number(req.query.pageSize) || 50, 500);
     const cursorRaw = req.query.cursor || null;
 
-    const qRaw = String(req.query.q || '').trim();
-    const q = qRaw.toLowerCase();
+    const qRaw = (req.query.q || '').trim();
+    const qNorm = qRaw.toLowerCase().replace(/\s+/g, ''); // "375 ml" -> "375ml"
 
-    let colRef = merchantId
+    const colRef = merchantId
       ? firestore.collection('merchants').doc(merchantId).collection('inventory')
       : firestore.collection('inventory');
 
@@ -1323,9 +1444,8 @@ app.get('/api/inventory', requireLogin, async (req, res) => {
     if (cursorRaw) {
       try {
         const decoded = JSON.parse(Buffer.from(cursorRaw, 'base64').toString('utf8'));
-        if (decoded && typeof decoded === 'object' && decoded.m) cursor = decoded;
+        if (decoded && typeof decoded === 'object' && decoded.m && decoded.id) cursor = decoded;
       } catch {
-        // old cursor format = docId string
         cursor = { m: 'doc', id: cursorRaw };
       }
     }
@@ -1333,20 +1453,17 @@ app.get('/api/inventory', requireLogin, async (req, res) => {
     // -----------------------------
     // Choose mode (or honor cursor mode)
     // -----------------------------
-    const isDigits = /^[0-9]+$/.test(qRaw);
-    const looksLikeToken = qRaw && !/\s/.test(qRaw) && qRaw.length <= 64;
+    const isDigitsNorm = /^[0-9]+$/.test(qNorm);
+    const looksLikeToken = qNorm && qNorm.length <= 64; // "375ml", "750ml", "crownroyal", etc.
 
-    // if cursor specifies a mode, keep it (prevents switching modes mid-pagination)
     let mode = cursor?.m || null;
 
-    // if no query, force normal mode
-    if (!q) mode = 'doc';
+    if (!qNorm) mode = 'doc';
 
-    // if no cursor mode, detect
     if (!mode) {
-      if (isDigits && qRaw.length >= 8) mode = 'gtin';
-      else if (looksLikeToken) mode = 'sku';
-      else mode = 'item_prefix';
+      if (isDigitsNorm && qNorm.length >= 8) mode = 'gtin';
+      else if (looksLikeToken) mode = 'token';     // ✅ your new fast search
+      else mode = 'item_prefix';                   // fallback for general text
     }
 
     // -----------------------------
@@ -1354,13 +1471,16 @@ app.get('/api/inventory', requireLogin, async (req, res) => {
     // -----------------------------
     const buildQuery = (m) => {
       if (m === 'gtin') {
-        // GTIN stored as string: use raw (preserves leading zeros)
-        return colRef.where('gtin', '==', qRaw).orderBy('__name__').limit(pageSize);
+        // preserve leading zeros; use normalized digits (spaces removed)
+        return colRef.where('gtin', '==', qNorm).orderBy('__name__').limit(pageSize);
       }
 
-      if (m === 'sku') {
-        // Recommended: store sku_lc in docs; otherwise sku match is case-sensitive
-        return colRef.where('sku_lc', '==', q).orderBy('__name__').limit(pageSize);
+      if (m === 'token') {
+        // ✅ requires search_tokens: array-contains "375ml" / "50ml" etc.
+        return colRef
+          .where('search_tokens', 'array-contains', qNorm)
+          .orderBy('__name__')
+          .limit(pageSize);
       }
 
       if (m === 'item_prefix') {
@@ -1368,8 +1488,8 @@ app.get('/api/inventory', requireLogin, async (req, res) => {
         return colRef
           .orderBy('item_name_lc')
           .orderBy('__name__')
-          .startAt(q)
-          .endAt(q + '\uf8ff')
+          .startAt(qNorm)
+          .endAt(qNorm + '\uf8ff')
           .limit(pageSize);
       }
 
@@ -1387,31 +1507,27 @@ app.get('/api/inventory', requireLogin, async (req, res) => {
         if (typeof cursor.v === 'string') {
           return query.startAfter(cursor.v, cursor.id);
         }
-        return query; // if bad cursor, just ignore
+        return query;
       }
 
-      // doc/gtin/sku pagination by doc snapshot
+      // doc/gtin/token pagination by doc snapshot (orderBy __name__)
       const snap = await colRef.doc(cursor.id).get();
       if (snap.exists) return query.startAfter(snap);
       return query;
     };
 
     // -----------------------------
-    // Run query (with graceful fallback ONLY on the first page)
+    // Run query (fallback only on first page)
     // -----------------------------
     let query = buildQuery(mode);
     query = await applyCursor(query, mode);
 
     let snap = await query.get();
 
-    // Only if it's page 1 (no cursor) AND we got nothing, fallback once:
-    if ((!cursorRaw || cursor?.m === 'doc') && q && snap.empty) {
-      if (mode === 'gtin' || mode === 'sku') {
-        mode = 'item_prefix';
-        let q2 = buildQuery(mode);
-        // no cursor on fallback first page
-        snap = await q2.get();
-      }
+    // Optional fallback: if GTIN search returns nothing, try token search (page 1 only)
+    if (!cursorRaw && qNorm && snap.empty && mode === 'gtin') {
+      mode = 'token';
+      snap = await buildQuery(mode).get();
     }
 
     const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -1426,12 +1542,8 @@ app.get('/api/inventory', requireLogin, async (req, res) => {
       if (mode === 'item_prefix') {
         const v = String(last.data().item_name_lc || '');
         nextCursor = Buffer.from(JSON.stringify({ m: 'item_prefix', v, id: last.id }), 'utf8').toString('base64');
-      } else if (mode === 'gtin') {
-        nextCursor = Buffer.from(JSON.stringify({ m: 'gtin', id: last.id }), 'utf8').toString('base64');
-      } else if (mode === 'sku') {
-        nextCursor = Buffer.from(JSON.stringify({ m: 'sku', id: last.id }), 'utf8').toString('base64');
       } else {
-        nextCursor = Buffer.from(JSON.stringify({ m: 'doc', id: last.id }), 'utf8').toString('base64');
+        nextCursor = Buffer.from(JSON.stringify({ m: mode, id: last.id }), 'utf8').toString('base64');
       }
     }
 
@@ -1447,53 +1559,111 @@ app.get('/api/gtin-matrix', requireLogin, async (req, res) => {
     const pageSize = Math.min(Number(req.query.pageSize) || 50, 250);
     const cursor = req.query.cursor || null;
 
-    const qRaw = (req.query.q || '').trim();
-    const q = qRaw.toLowerCase();
-    const isDigits = /^[0-9]+$/.test(q);
+    const qRaw = (req.query.q || '').trim().toLowerCase();
+    const qNoSpace = qRaw.replace(/\s+/g, '');      // "200 ml" -> "200ml"
+    const hasQuery = !!qRaw;
+    const isDigits = /^[0-9]+$/.test(qNoSpace);     // pure digits (for GTIN search)
 
-    // ✅ where this data comes from:
-    // Recommended: build & store these docs in a collection named "gtin_matrix"
-    // docId = gtin
     const colRef = firestore.collection('gtin_matrix');
 
     let query;
-    let cursorMode = 'docId';
+    let cursorMode = 'docId'; // 'docId' | 'scan'
 
-    if (q) {
-      if (isDigits && q.length >= 8) {
-        query = colRef.orderBy('__name__').startAt(qRaw).endAt(qRaw).limit(pageSize);
+    if (hasQuery) {
+      if (isDigits && qNoSpace.length >= 8) {
+        // ✅ GTIN-style search: use document ID (we assume docId = GTIN)
+        query = colRef
+          .orderBy('__name__')
+          .startAt(qNoSpace)
+          .endAt(qNoSpace)
+          .limit(pageSize);
         cursorMode = 'docId';
       } else {
-        query = colRef
-          .orderBy('item_name_lc')
-          .orderBy('__name__')
-          .startAt(q)
-          .endAt(q + '\uf8ff')
-          .limit(pageSize);
-        cursorMode = 'search';
+        // ✅ Name / size / SKU search (e.g. "tito", "200ml", "200 ml")
+        // Firestore can't do substring matches, so we scan in batches
+        cursorMode = 'scan';
       }
     } else {
+      // No search term: just paginate by docId
       query = colRef.orderBy('__name__').limit(pageSize);
       cursorMode = 'docId';
     }
 
-    if (cursor) {
-      if (cursorMode === 'docId') {
-        const cursorDoc = await colRef.doc(cursor).get();
-        if (cursorDoc.exists) query = query.startAfter(cursorDoc);
-      } else {
-        let decoded = null;
-        try { decoded = JSON.parse(Buffer.from(cursor, 'base64').toString('utf8')); } catch {}
-        if (decoded?.v && decoded?.id) query = query.startAfter(decoded.v, decoded.id);
-      }
-    }
-
-    // locations list (small): keep it in a tiny collection
+    // Load locations once
     const locSnap = await firestore.collection('location_index').get();
     const locations = locSnap.docs
       .map(d => d.data()?.locKey)
       .filter(Boolean)
       .sort();
+
+    // ---------- SCAN MODE (substring search for things like "200ml") ----------
+    if (cursorMode === 'scan') {
+      const matchNorm = qNoSpace; // normalized search text
+
+      const collected = [];
+      const batchSize = 400; // Firestore read batch
+      let lastId = cursor || null;
+      let lastSnap = null;
+      let reachedLimit = false;
+
+      while (!reachedLimit) {
+        let qBatch = colRef.orderBy('__name__').limit(batchSize);
+        if (lastId) {
+          const cursorDoc = await colRef.doc(lastId).get();
+          if (cursorDoc.exists) {
+            qBatch = qBatch.startAfter(cursorDoc);
+          }
+        }
+
+        const snap = await qBatch.get();
+        lastSnap = snap;
+        if (snap.empty) break;
+
+        for (const doc of snap.docs) {
+          lastId = doc.id;
+          const d = doc.data();
+
+          const nameNorm = (d.item_name_lc || d.item_name || '')
+            .toString()
+            .toLowerCase()
+            .replace(/\s+/g, '');
+          const skuNorm = (d.sku || '')
+            .toString()
+            .toLowerCase()
+            .replace(/\s+/g, '');
+
+          // ✅ substring match in normalized name or SKU
+          if (!matchNorm || nameNorm.includes(matchNorm) || skuNorm.includes(matchNorm)) {
+            collected.push({ gtin: doc.id, ...d });
+            if (collected.length >= pageSize) {
+              reachedLimit = true;
+              break;
+            }
+          }
+        }
+
+        // No more docs to scan
+        if (snap.size < batchSize) break;
+      }
+
+      const rows = collected;
+      let nextCursor = null;
+
+      // If we scanned a full batch and hit the page limit, expose cursor for "Next"
+      if (lastSnap && lastSnap.size === batchSize && lastId && rows.length >= pageSize) {
+        nextCursor = lastId;
+      }
+
+      return res.json({ rows, locations, nextCursor });
+    }
+
+    // ---------- DOC-ID MODE (GTIN or no search) ----------
+    if (cursor && cursorMode === 'docId') {
+      const cursorDoc = await colRef.doc(cursor).get();
+      if (cursorDoc.exists) {
+        query = query.startAfter(cursorDoc);
+      }
+    }
 
     const snap = await query.get();
     const rows = snap.docs.map(d => ({ gtin: d.id, ...d.data() }));
@@ -1501,11 +1671,7 @@ app.get('/api/gtin-matrix', requireLogin, async (req, res) => {
     let nextCursor = null;
     if (snap.size > 0) {
       const last = snap.docs[snap.docs.length - 1];
-      if (cursorMode === 'docId') nextCursor = last.id;
-      else {
-        const v = (last.data().item_name_lc || '').toString();
-        nextCursor = Buffer.from(JSON.stringify({ v, id: last.id }), 'utf8').toString('base64');
-      }
+      nextCursor = last.id;
     }
 
     res.json({ rows, locations, nextCursor });
@@ -1514,6 +1680,7 @@ app.get('/api/gtin-matrix', requireLogin, async (req, res) => {
     res.status(500).json({ error: err.message || 'Internal error' });
   }
 });
+
 
 // Duplicate GTINs page + API
 app.get('/duplicates-gtin', requireLogin, async (req, res) => {

@@ -399,9 +399,14 @@
       searchInput.addEventListener('input', () => {
         clearTimeout(searchDebounce);
         searchDebounce = setTimeout(() => {
-          currentQuery = (searchInput.value || '').trim();
-          resetAndReload();
-        }, 300);
+          // ✅ normalize so "375 ml" and "375ml" behave the same
+          currentQuery = (searchInput.value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, '');
+
+          resetAndReload(); // this should reload page 0 and fetch with q=
+        }, 250);
       });
     }
 

@@ -137,14 +137,19 @@ function shouldReplace(existing, candidate) {
   return cTime >= eTime;
 }
 
-async function main() {
+async function runBuildGtinMatrix(options = {}) {
   const args = process.argv.slice(2);
+
   const getArg = (name) => {
+    // allow override from options if passed programmatically
+    if (options[name] !== undefined && options[name] !== null) {
+      return String(options[name]);
+    }
     const hit = args.find(a => a.startsWith(`--${name}=`));
     return hit ? hit.split('=').slice(1).join('=') : null;
   };
 
-  const merchantId = getArg('merchantId'); // optional: build from merchants/{id}/inventory instead
+  const merchantId = getArg('merchantId'); // optional
   const readPageSize = Math.min(Number(getArg('readPage')) || DEFAULT_READ_PAGE, 2000);
   const writeBatchSize = Math.min(Number(getArg('writeBatch')) || DEFAULT_WRITE_BATCH, 450);
 
@@ -321,7 +326,16 @@ async function main() {
   console.log(`Total scanned docs: ${scanned}`);
 }
 
-main().catch((e) => {
-  console.error('Fatal build error:', e);
-  process.exit(1);
-});
+module.exports = {
+  runBuildGtinMatrix,
+  buildGtinMatrix: runBuildGtinMatrix, // ✅ alias for your nightly sync
+};
+
+// CLI usage still works
+if (require.main === module) {
+  runBuildGtinMatrix().catch((e) => {
+    console.error('Fatal build error:', e);
+    process.exit(1);
+  });
+}
+

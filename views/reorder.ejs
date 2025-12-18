@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Reorder</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <%- include('partials/header', {
+    pageTitle: 'Reorder Recommendations',
+    currentView: 'reorder',
+    merchant: typeof merchant !== 'undefined' ? merchant : null,
+    merchantId: typeof merchantId !== 'undefined' ? merchantId : null,
+    merchants: typeof merchants !== 'undefined' ? merchants : [],
+    activePage: 'reorder',
+    showFilters: true
+  }) %>
+
+  <div style="padding:12px 16px;">
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <label><strong>Location:</strong></label>
+      <select id="locationSelect"></select>
+
+      <label><strong>Days:</strong></label>
+      <select id="daysSelect">
+        <option value="7">7</option>
+        <option value="14">14</option>
+        <option value="28" selected>28</option>
+        <option value="56">56</option>
+      </select>
+
+      <button id="runBtn" class="btn btn-sm btn-primary">Run</button>
+      <span id="statusText" style="opacity:.8;"></span>
+    </div>
+
+    <table id="tbl" style="margin-top:12px;">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>SKU</th>
+          <th>On Hand</th>
+          <th>Sold</th>
+          <th>Avg/Day</th>
+          <th>Days Cover</th>
+          <th>Reorder</th>
+          <th>Vendor</th>
+          <th>Est Cost</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <%- include('partials/footer') %>
+
+  <script>
+    const DASHBOARD_MERCHANT_ID = <%- JSON.stringify(merchantId || null) %>;
+    const merchants = <%- JSON.stringify(merchants || []) %>;
+
+    // loader elements from header
+    const topLoader = document.getElementById('top-loader');
+    const topLoaderBar = document.getElementById('top-loader-bar');
+    const miniSpinner = document.getElementById('mini-spinner');
+    const loadStatus = document.getElementById('load-status');
+
+    function startLoading() {
+      if (topLoader) topLoader.classList.add('is-on');
+      if (miniSpinner) miniSpinner.classList.add('is-on');
+      if (topLoaderBar) topLoaderBar.style.width = '12%';
+      let p = 12;
+      window.__lt = setInterval(() => {
+        p = Math.min(p + Math.random() * 10, 92);
+        if (topLoaderBar) topLoaderBar.style.width = p.toFixed(0) + '%';
+      }, 180);
+    }
+    function stopLoading() {
+      clearInterval(window.__lt);
+      if (topLoaderBar) topLoaderBar.style.width = '100%';
+      setTimeout(() => {
+        if (topLoader) topLoader.classList.remove('is-on');
+        if (miniSpinner) miniSpinner.classList.remove('is-on');
+        if (topLoaderBar) topLoaderBar.style.width = '0%';
+      }, 180);
+    }
+
+    const tbody = document.querySelector('#tbl tbody');
+    const statusText = document.getElementById('statusText');
+    const daysSelect = document.getElementById('daysSelect');
+    const runBtn = document.getElementById('runBtn');
+    const locationSelect = document.getElementById('locationSelect');
+
+    // TODO: you can populate locations from your Firestore location_index via a tiny API.
+    // For v1, use a manual list (or add a /api/locations endpoint).
+    const locationOptions = <%- JSON.stringify(locations || []) %>; // pass from route
+
+    function renderLocations() {
+      locationSelect.innerHTML = '';
+      for (const loc of locationOptions) {
+        const opt = document.createElement('option');
+        opt.value = loc.location_id;
+        opt.textContent = loc.location_name || loc.location_id;
+        locationSelect.appendChild(opt);
+      }
+    }
+
+    function esc(s){ return (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    function render(rows) {
+      tbody.innerHTML = '';
+      if (!rows || !rows.length) {
+        tbody.innerHTML = `<tr><td colspan="9" style="opacity:.7;">No reorder rows.</td></tr>`;
+        return;
+      }
+      for (const r of rows) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${esc(r.item_name)}</td>
+          <td>${esc(r.sku)}</td>
+          <td>${r.on_hand}</td>
+          <td>${r.sold_window}</td>
+          <td>${r.avg_daily_sales}</td>
+          <td>${r.days_cover}</td>
+          <td style="font-weight:700;">${r.reorder_qty}</td>
+          <td>${esc(r.vendor || '')}</td>
+          <td>${r.est_cost != null ? ('$' + r.est_cost) : ''}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function run() {
+      const merchantId = DASHBOARD_MERCHANT_ID;
+      const locationId = locationSelect.value;
+      const days = daysSelect.value;
+
+      if (!merchantId) {
+        statusText.textContent = 'Open this page under /dashboard/<merchantId> so merchant is selected.';
+        return;
+      }
+      if (!locationId) {
+        statusText.textContent = 'Select a location.';
+        return;
+      }
+
+      startLoading();
+      statusText.textContent = 'Loading reorder…';
+
+      try {
+        const qs = new URLSearchParams({ merchantId, locationId, days });
+        const res = await fetch('/api/reorder?' + qs.toString());
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Failed');
+
+        render(data.rows || []);
+        statusText.textContent = `Loaded ${data.rows.length} rows`;
+      } catch (e) {
+        console.error(e);
+        statusText.textContent = 'Error: ' + e.message;
+      } finally {
+        stopLoading();
+      }
+    }
+
+    runBtn.addEventListener('click', run);
+
+    // init
+    renderLocations();
+  </script>
+</body>
+</html>

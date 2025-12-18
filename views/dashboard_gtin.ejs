@@ -50,6 +50,7 @@
   <%- include('partials/footer') %>
 
   <script>
+
     // header view switch
     const viewSelect = document.getElementById('viewSelect');
     if (viewSelect) viewSelect.addEventListener('change', () => {
@@ -109,13 +110,17 @@
     let currentSort = { key: null, direction: 'asc', type: 'string' };
 
     let inflight = null;
-    let currentQuery = '';
+
+    // 🔹 Single query string; backend will normalize "200 ml" -> "200ml"
+    let currentQueryRaw = '';
 
     function renderSkeleton() {
       tbody.innerHTML = '';
       for (let i = 0; i < 10; i++) {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td colspan="${4 + (locationKeys?.length || 0)}" style="padding:14px;opacity:.35;">&nbsp;</td>`;
+        tr.innerHTML =
+          `<td colspan="${4 + (locationKeys?.length || 0)}" ` +
+          `style="padding:14px;opacity:.35;">&nbsp;</td>`;
         tbody.appendChild(tr);
       }
     }
@@ -132,17 +137,22 @@
     }
 
     function getHeaderCells() {
-      return Array.from(document.querySelectorAll('#inventory-table thead th.sortable'));
+      return Array.from(
+        document.querySelectorAll('#inventory-table thead th.sortable')
+      );
     }
 
     function clearSortIndicators() {
-      getHeaderCells().forEach(th => th.classList.remove('sorted-asc', 'sorted-desc'));
+      getHeaderCells().forEach(th =>
+        th.classList.remove('sorted-asc', 'sorted-desc')
+      );
     }
 
     function sortBy(key, type) {
       if (!key) return;
       if (currentSort.key === key) {
-        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+        currentSort.direction =
+          currentSort.direction === 'asc' ? 'desc' : 'asc';
       } else {
         currentSort.key = key;
         currentSort.direction = 'asc';
@@ -152,7 +162,9 @@
       clearSortIndicators();
       getHeaderCells().forEach(th => {
         if (th.dataset.key === key) {
-          th.classList.add(currentSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc');
+          th.classList.add(
+            currentSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc'
+          );
         }
       });
 
@@ -161,11 +173,13 @@
 
     async function fetchPage(pageIndexToLoad) {
       const cursor = cursors[pageIndexToLoad] || null;
-
+    
       const params = new URLSearchParams();
       params.set('pageSize', String(rowsPerPage));
       if (cursor) params.set('cursor', cursor);
-      if (currentQuery) params.set('q', currentQuery);
+
+      // 🔹 Send raw search; backend will lowercase + strip spaces
+      if (currentQueryRaw) params.set('q', currentQueryRaw);
 
       const url = '/api/gtin-matrix?' + params.toString();
 
@@ -174,15 +188,17 @@
 
       startLoading();
 
-      const res = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: inflight.signal });
+      const res = await fetch(url, {
+        headers: { 'Accept': 'application/json' },
+        signal: inflight.signal,
+      });
       if (!res.ok) throw new Error(await res.text());
 
       const data = await res.json();
 
-      // locations only needs to come once
       if (!headerBuilt && data.locations) ensureHeader(data.locations);
 
-      const rows = (data.rows || []).map((r) => ({
+      const rows = (data.rows || []).map(r => ({
         gtin: r.gtin || '',
         item_name: r.item_name || '',
         category_name: r.category_name || '',
@@ -190,7 +206,10 @@
         pricesByLocation: r.pricesByLocation || {},
       }));
 
-      pages[pageIndexToLoad] = { rows, nextCursor: data.nextCursor || null };
+      pages[pageIndexToLoad] = {
+        rows,
+        nextCursor: data.nextCursor || null,
+      };
       cursors[pageIndexToLoad + 1] = data.nextCursor || null;
 
       stopLoading();
@@ -223,7 +242,6 @@
     function renderTable() {
       tbody.innerHTML = '';
 
-      // sort current page only
       if (currentSort.key) {
         const { key, type, direction } = currentSort;
         const dir = direction === 'asc' ? 1 : -1;
@@ -231,23 +249,34 @@
         currentRows.sort((a, b) => {
           const va = a[key];
           const vb = b[key];
+
           if (type === 'number') {
-            const na = (va == null || isNaN(va)) ? -Infinity : Number(va);
-            const nb = (vb == null || isNaN(vb)) ? -Infinity : Number(vb);
-            return na < nb ? -1 * dir : na > nb ? 1 * dir : 0;
+            const na =
+              va == null || isNaN(va) ? -Infinity : Number(va);
+            const nb =
+              vb == null || isNaN(vb) ? -Infinity : Number(vb);
+            if (na < nb) return -1 * dir;
+            if (na > nb) return 1 * dir;
+            return 0;
           } else {
             const sa = (va ?? '').toString().toLowerCase();
             const sb = (vb ?? '').toString().toLowerCase();
-            return sa < sb ? -1 * dir : sa > sb ? 1 * dir : 0;
+            if (sa < sb) return -1 * dir;
+            if (sa > sb) return 1 * dir;
+            return 0;
           }
         });
       }
 
       if (!currentRows.length) {
-        tbody.innerHTML = `<tr><td colspan="${4 + locationKeys.length}">No GTIN rows found.</td></tr>`;
+        tbody.innerHTML =
+          `<tr><td colspan="${4 + locationKeys.length}">No GTIN rows found.</td></tr>`;
         pageInfo.textContent = `Page ${currentPageIndex + 1} (0 rows)`;
         prevBtn.disabled = currentPageIndex <= 0;
-        nextBtn.disabled = !(pages[currentPageIndex] && pages[currentPageIndex].nextCursor);
+        nextBtn.disabled = !(
+          pages[currentPageIndex] &&
+          pages[currentPageIndex].nextCursor
+        );
         return;
       }
 
@@ -291,7 +320,8 @@
             input.type = 'number';
             input.step = '0.01';
             input.className = 'price-input';
-            if (info.price != null) input.value = Number(info.price).toFixed(2);
+            if (info.price != null)
+              input.value = Number(info.price).toFixed(2);
 
             input.dataset.merchantId = info.merchant_id || '';
             input.dataset.variationId = info.variation_id || '';
@@ -309,7 +339,9 @@
         tbody.appendChild(tr);
       }
 
-      const hasNext = pages[currentPageIndex] && pages[currentPageIndex].nextCursor;
+      const hasNext =
+        pages[currentPageIndex] &&
+        pages[currentPageIndex].nextCursor;
       pageInfo.textContent = `Page ${currentPageIndex + 1} (rows: ${currentRows.length})`;
       prevBtn.disabled = currentPageIndex <= 0;
       nextBtn.disabled = !hasNext;
@@ -317,16 +349,20 @@
 
     // sorting events
     getHeaderCells().forEach(th => {
-      th.addEventListener('click', () => sortBy(th.dataset.key, th.dataset.type || 'string'));
+      th.addEventListener('click', () =>
+        sortBy(th.dataset.key, th.dataset.type || 'string')
+      );
     });
 
-    // DB-backed search (debounced)
+    // --- DB-backed search (debounced, backend handles space normalization) ---
     let searchDebounce = null;
     if (searchInput) {
       searchInput.addEventListener('input', () => {
         clearTimeout(searchDebounce);
         searchDebounce = setTimeout(() => {
-          currentQuery = (searchInput.value || '').trim().toLowerCase();
+          const raw = (searchInput.value || '').trim().toLowerCase();
+          currentQueryRaw = raw; // e.g. "200 ml"
+
           pages = [];
           cursors = [null];
           currentPageIndex = 0;
@@ -344,7 +380,10 @@
       loadPage(0);
     });
 
-    prevBtn.addEventListener('click', () => currentPageIndex > 0 && loadPage(currentPageIndex - 1));
+    prevBtn.addEventListener('click', () => {
+      if (currentPageIndex > 0) loadPage(currentPageIndex - 1);
+    });
+
     nextBtn.addEventListener('click', () => {
       const page = pages[currentPageIndex];
       if (page && page.nextCursor) loadPage(currentPageIndex + 1);
@@ -359,7 +398,8 @@
       const variationId = input.dataset.variationId;
       const currency = input.dataset.currency || 'USD';
 
-      if (!merchantId || !variationId) return alert('Missing merchant/variation info.');
+      if (!merchantId || !variationId)
+        return alert('Missing merchant/variation info.');
 
       const numericPrice = Number(newValue);
       if (!newValue || Number.isNaN(numericPrice) || numericPrice < 0) {
@@ -374,13 +414,22 @@
         const res = await fetch('/api/update-price', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ merchantId, variationId, price: numericPrice, currency }),
+          body: JSON.stringify({
+            merchantId,
+            variationId,
+            price: numericPrice,
+            currency,
+          }),
         });
         const data = await res.json();
-        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update price');
+        if (!res.ok || !data.success)
+          throw new Error(data.error || 'Failed to update price');
 
         input.classList.add('price-updated');
-        setTimeout(() => input.classList.remove('price-updated'), 800);
+        setTimeout(
+          () => input.classList.remove('price-updated'),
+          800
+        );
       } catch (err) {
         console.error(err);
         input.classList.add('price-error');
@@ -412,11 +461,14 @@
           body: JSON.stringify({ gtin, itemName: newName }),
         });
         const data = await res.json();
-        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update item name');
+        if (!res.ok || !data.success)
+          throw new Error(data.error || 'Failed to update item name');
 
-        // refresh current page visually (optional: re-fetch page)
         input.classList.add('name-updated');
-        setTimeout(() => input.classList.remove('name-updated'), 800);
+        setTimeout(
+          () => input.classList.remove('name-updated'),
+          800
+        );
       } catch (err) {
         console.error(err);
         input.classList.add('name-error');
@@ -433,7 +485,8 @@
       } catch (e) {
         console.error(e);
         stopLoading();
-        tbody.innerHTML = `<tr><td colspan="4">Failed to load. Check server logs.</td></tr>`;
+        tbody.innerHTML =
+          `<tr><td colspan="4">Failed to load. Check server logs.</td></tr>`;
       }
     })();
   </script>

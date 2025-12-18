@@ -308,5 +308,45 @@ You can adapt similar lines for `sync:gtin-meta` and `sync:gtin-names:square`.
   - APIs enabled (Firestore, Sheets).
   - Sheet shared with service account email if needed.
 
-For deeper explanations, refer back to **DOCS.md**.
 
+## 8. Jobs Troubleshooting
+
+- # 1. Build Image
+
+  ```bash
+  gcloud builds submit --tag gcr.io/square-inventory-480509/square-inventory-sync
+  ```
+
+- # 2. Create job
+
+  ```bash
+  gcloud run jobs create full-nightly-sync \
+    --image gcr.io/square-inventory-480509/square-inventory-sync \
+    --region us-central1 \
+    --command node \
+    --args scripts/fullNightlySync.js \
+    --memory 2Gi \
+    --max-retries 1 \
+    --task-timeout 3600s
+  ```
+
+- # 3. Run job
+
+  ```bash
+  gcloud run jobs execute full-nightly-sync --region us-central1
+  ```
+
+# - 4. Schedule Job
+
+  ```bash
+  gcloud scheduler jobs create http full-nightly-sync \
+    --schedule="0 3 * * *" \  # every night at 3AM, adjust as you like
+    --time-zone="America/Chicago" \
+    --http-method=POST \
+    --uri="https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/square-inventory-480509/jobs/full-nightly-sync:run" \
+    --oauth-service-account-email="YOUR_SCHEDULER_SA@PROJECT_ID.iam.gserviceaccount.com" \
+    --oauth-token-scope="https://www.googleapis.com/auth/cloud-platform"
+  ```
+
+
+For deeper explanations, refer back to **DOCS.md**.

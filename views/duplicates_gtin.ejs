@@ -103,13 +103,32 @@
     }
 
     function renderRows(data) {
-      const q = (filter.value || '').trim().toLowerCase();
+      const rawQ = filter.value || '';
+      const q = rawQ.trim().toLowerCase();
+      const qNoSpace = q.replace(/\s+/g, '');
+
+      const normalize = (s) => {
+        const str = (s || '').toString().toLowerCase();
+        return {
+          base: str,
+          noSpace: str.replace(/\s+/g, ''),
+        };
+      };
+
       const rows = (data.dupes || []).filter(r => {
         if (!q) return true;
+
         const t = [
-          r.gtin, r.location_id, r.location_name, r.item_name, r.sku, r.category_name
-        ].join(' ').toLowerCase();
-        return t.includes(q);
+          r.gtin,
+          r.location_id,
+          r.location_name,
+          r.item_name,
+          r.sku,
+          r.category_name
+        ].join(' ');
+
+        const { base, noSpace } = normalize(t);
+        return base.includes(q) || noSpace.includes(qNoSpace);
       });
 
       tbody.innerHTML = '';

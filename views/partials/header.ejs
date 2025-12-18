@@ -48,10 +48,6 @@
         Dashboard
       </a>
 
-      <a href="/reports" class="nav-link <%= activePage === 'reports' ? 'active' : '' %>">
-        Reports
-      </a>
-
       <a href="/dashboard-gtin" class="nav-link <%= activePage === 'dashboard-gtin' ? 'active' : '' %>">
         Item Price Mismatch
       </a>
@@ -63,6 +59,17 @@
       <a href="/duplicates-gtin" class="nav-link <%= activePage === 'duplicates-gtin' ? 'active' : '' %>">
         Duplicate GTINs
       </a>
+
+      <a href="/inventory-integrity" class="nav-link <%= activePage === 'inventory-integrity' ? 'active' : '' %>">
+        Negative Items
+      </a>
+
+      <a href="/reports" class="nav-link <%= activePage === 'reports' ? 'active' : '' %>">
+        Reports
+      </a>
+
+      <a href="/reorder" class="nav-link <%= activePage === 'reorder' ? 'active' : '' %>">Reorder</a>
+
     </nav>
   </div>
 
