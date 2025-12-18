@@ -1,21 +1,30 @@
-#!/usr/bin/env bash
-set -euo pipefail
+et -euo pipefail
 
 MSG="${1:-}"
 
 if [[ -z "$MSG" ]]; then
-  echo "Usage: ./scripts/gpush.sh \"commit message\""
-  exit 1
+	  echo "Usage: ./gpush.sh \"commit message\""
+	    exit 1
 fi
+
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+REMOTE="${2:-origin}"
+
+echo "➡️  Branch: $BRANCH"
+echo "➡️  Remote: $REMOTE"
 
 git status --porcelain
 git add .
-git commit -m "$MSG" || {
-  echo "Nothing to commit."
-  exit 0
-}
 
-# push current branch to its upstream if set; otherwise set upstream to origin/<branch>
-BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-git push -u origin "$BRANCH"
+if git diff --cached --quiet; then
+	  echo "ℹ️  Nothing staged to commit."
+	    exit 0
+fi
+
+git commit -m "$MSG"
+
+echo "🚀 Pushing to: $REMOTE/$BRANCH"
+git push -u "$REMOTE" "$BRANCH"
+
+echo "✅ Done: pushed to $REMOTE/$BRANCH"
 
