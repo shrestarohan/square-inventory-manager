@@ -1,5 +1,5 @@
 // scripts/syncFirestoreItemNamesToSquare.js
-require('dotenv').config();
+require("../lib/loadEnv"); // adjust relative path
 
 const {
     createSquareClient,

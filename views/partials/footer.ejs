@@ -12,6 +12,12 @@
       </span>
     </div>
 
+    <% if (syncStatus && syncStatus.last_full_sync_at) { %>
+    <div class="sync-info" style="font-size: 12px; opacity: .7; margin-top: 4px;">
+      Last full inventory sync: <%= syncStatus.last_full_sync_at %>
+    </div>
+    <% } %>    
+
     <div class="app-footer__right">
       <span class="app-footer__muted">v1.0.0</span>
       <span class="app-footer__sep">•</span>

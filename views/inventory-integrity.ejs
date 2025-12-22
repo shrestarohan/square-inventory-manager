@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Inventory Integrity</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+  <%- include('partials/header', {
+    pageTitle: 'Inventory Integrity — Negative Items',
+    currentView: 'item',   // ✅ or 'integrity' if your header supports it
+    merchant: typeof merchant !== 'undefined' ? merchant : null,
+    merchantId: typeof merchantId !== 'undefined' ? merchantId : null,
+    merchants: typeof merchants !== 'undefined' ? merchants : [],
+    activePage: 'inventory-integrity'
+  }) %>
+
+  <div class="container" style="padding: 16px;">
+    <div style="margin: 10px 0;">
+      <label for="merchantSelectIntegrity">Merchant:</label>
+      <select id="merchantSelectIntegrity" style="min-width: 360px;">
+        <option value="">All merchants</option>
+        <% (merchants || []).forEach(m => { %>
+          <option value="<%= m.id %>">
+            <%= (m.business_name || m.id) %>
+          </option>
+        <% }) %>
+      </select>
+    </div>
+
+    <p id="status"></p>
+
+    <table id="tbl" style="width:100%; border-collapse: collapse;">
+      <thead>
+        <tr>
+          <th>Store</th>
+          <th>Item</th>
+          <th>GTIN</th>
+          <th>Qty</th>
+          <th>AI Reason</th>
+          <th>Suggested</th>
+          <th>Fix</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+  // ---------- loader elements (from header.ejs) ----------
+  const topLoader = document.getElementById('top-loader');
+  const topLoaderBar = document.getElementById('top-loader-bar');
+  const miniSpinner = document.getElementById('mini-spinner');
+  const loadStatus = document.getElementById('load-status');
+
+  let loaderTimer = null;
+
+  function setStatus(msg) {
+    if (loadStatus) loadStatus.textContent = (msg ?? '');
+  }
+
+  function startLoading(label) {
+    setStatus(label ?? '');
+    if (topLoader) topLoader.classList.add('is-on');
+    if (miniSpinner) miniSpinner.classList.add('is-on');
+
+    if (topLoaderBar) topLoaderBar.style.width = '10%';
+    let p = 10;
+
+    clearInterval(loaderTimer);
+    loaderTimer = setInterval(() => {
+      p = Math.min(p + Math.random() * 12, 92);
+      if (topLoaderBar) topLoaderBar.style.width = p.toFixed(0) + '%';
+    }, 180);
+  }
+
+  function stopLoading() {
+    clearInterval(loaderTimer);
+    loaderTimer = null;
+
+    if (topLoaderBar) topLoaderBar.style.width = '100%';
+    setTimeout(() => {
+      if (topLoader) topLoader.classList.remove('is-on');
+      if (miniSpinner) miniSpinner.classList.remove('is-on');
+      if (topLoaderBar) topLoaderBar.style.width = '0%';
+      setStatus('');
+    }, 180);
+  }
+  
+  function getRowEl(docId) {
+    return document.querySelector(`#tbl tbody tr[data-docid="${CSS.escape(docId)}"]`);
+  }
+
+  function setRowStatus(docId, msg) {
+    const tr = getRowEl(docId);
+    const el = tr?.querySelector('.row-status');
+    if (el) el.textContent = msg || '';
+  }
+
+  function setRowBusy(docId, busy) {
+    const tr = getRowEl(docId);
+    if (!tr) return;
+    tr.querySelectorAll('button.btn-fix, input').forEach(el => el.disabled = !!busy);
+    tr.style.opacity = busy ? '0.65' : '1';
+  }
+
+  function flashRow(docId) {
+    const tr = getRowEl(docId);
+    if (!tr) return;
+    tr.classList.add('row-flash');
+    setTimeout(() => tr.classList.remove('row-flash'), 900);
+  }
+
+  function patchRowFromData(docId, r) {
+    const tr = getRowEl(docId);
+    if (!tr) return;
+
+    const loc = tr.querySelector('.cell-location');
+    const name = tr.querySelector('.cell-name');
+    const gtin = tr.querySelector('.cell-gtin');
+    const qty = tr.querySelector('.cell-qty');
+
+    if (loc) loc.textContent = (r.location_name || r.location_id || '');
+    if (name) name.textContent = (r.name || r.sku || r.id || '');
+    if (gtin) gtin.textContent = (r.gtin || '');
+    if (qty) qty.textContent = (r.qty ?? '');
+  }
+  
+  const searchInput = document.getElementById('search');
+  let currentQuery = '';
+  let searchDebounce = null;
+
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        currentQuery = (searchInput.value || '')
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, '');
+        loadNegatives();
+      }, 250);
+    });
+  }
+
+  async function refreshRow(docId, merchantId) {
+    const params = new URLSearchParams();
+    params.set('docId', docId);
+    if (merchantId) params.set('merchantId', merchantId);
+
+    const res = await fetch('/api/inventory/row?' + params.toString());
+    const data = await res.json();
+    if (data.ok && data.row) patchRowFromData(docId, data.row);
+  }
+
+  async function loadNegatives() {
+    const merchantId = (document.getElementById('merchantSelectIntegrity')?.value || '').trim();
+
+    const params = new URLSearchParams();
+    params.set('limit', '200');
+    if (merchantId) params.set('merchantId', merchantId);
+    if (typeof currentQuery !== 'undefined' && currentQuery) params.set('q', currentQuery);
+
+    const url = `/api/inventory/negatives?${params.toString()}`;
+
+    document.getElementById('status').innerText = 'Loading...';
+    startLoading(''); // same style as dashboard
+
+    try {
+      const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      const data = await res.json();
+
+      if (!data.ok) {
+        document.getElementById('status').innerText = 'Error: ' + data.error;
+        return;
+      }
+
+      document.getElementById('status').innerText = `Found ${data.count} negative items`;
+      const tbody = document.querySelector('#tbl tbody');
+      tbody.innerHTML = '';
+
+      for (const r of data.rows) {
+        const tr = document.createElement('tr');
+        tr.dataset.docid = r.id;
+        tr.innerHTML = `
+          <td class="cell-location">${escapeHtml(r.location_name || r.location_id || '')}</td>
+          <td class="cell-name">${escapeHtml(r.name || r.sku || r.id)}</td>
+          <td class="cell-gtin">${escapeHtml(r.gtin || '')}</td>
+          <td class="cell-qty" style="font-weight:700;">${r.qty}</td>
+          <td>${escapeHtml(r.ai?.root_cause || '')}</td>
+          <td>${escapeHtml(r.ai?.suggested_action || '')}</td>
+          <td>
+            <div class="action-row">
+              <input type="number" min="0" step="1" id="count-${r.id}" style="width:80px;" placeholder="Qty" />
+              <button class="btn-fix" onclick="setCount('${r.id}', '${r.merchant_id || ''}')">Set</button>
+              <button class="btn-fix" onclick="fixToZero('${r.id}', '${r.merchant_id || ''}')">Adjust to 0</button>
+              <span class="row-status" aria-live="polite"></span>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+    } catch (e) {
+      console.error(e);
+      document.getElementById('status').innerText = 'Error loading negatives';
+    } finally {
+      stopLoading();
+    }
+  }
+
+  async function setCount(docId, merchantId) {
+    const v = document.getElementById(`count-${docId}`)?.value;
+    const countedQty = Number(v);
+    if (!Number.isFinite(countedQty) || countedQty < 0) {
+      setRowStatus(docId, 'Enter qty ≥ 0');
+      return;
+    }
+
+    setRowBusy(docId, true);
+    setRowStatus(docId, 'Updating Square…');
+    startLoading('');
+
+    try {
+      const res = await fetch('/api/inventory/fix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          docId,
+          merchantId: merchantId || null,
+          action: 'SET_COUNTED_QTY',
+          countedQty,
+          applyToSquare: true,
+          note: 'manual count from integrity page',
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Failed');
+
+      setRowStatus(docId, 'Synced ✔ refreshing…');
+
+      // Option A: refresh just this row
+      await refreshRow(docId, merchantId);
+
+      setRowStatus(docId, 'Synced ✔');
+      flashRow(docId);
+    } catch (e) {
+      console.error(e);
+      setRowStatus(docId, 'Failed: ' + (e.message || e));
+    } finally {
+      stopLoading();
+      setRowBusy(docId, false);
+      setTimeout(() => setRowStatus(docId, ''), 2500);
+    }
+  }
+
+  async function fixToZero(docId, merchantId) {
+    setRowBusy(docId, true);
+    setRowStatus(docId, 'Updating Square…');
+    startLoading('');
+
+    try {
+      const res = await fetch('/api/inventory/fix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          docId,
+          merchantId: merchantId || null,
+          action: "ADJUST_TO_ZERO",
+          applyToSquare: true,
+          note: "UI fix (inventory-integrity page)"
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Fix failed');
+
+      setRowStatus(docId, 'Synced ✔ refreshing…');
+
+      // ✅ best: refresh just this row (if you added /api/inventory/row)
+      if (typeof refreshRow === 'function') {
+        await refreshRow(docId, merchantId);
+      } else {
+        // fallback: reload full table
+        await loadNegatives();
+      }
+
+      setRowStatus(docId, 'Synced ✔');
+      flashRow(docId);
+    } catch (e) {
+      console.error(e);
+      setRowStatus(docId, 'Failed: ' + (e.message || e));
+    } finally {
+      stopLoading();
+      setRowBusy(docId, false);
+      setTimeout(() => setRowStatus(docId, ''), 2500);
+    }
+  }
+
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
+    }[c]));
+  }
+
+  const merchantSelectIntegrity = document.getElementById('merchantSelectIntegrity');
+  if (merchantSelectIntegrity) {
+    merchantSelectIntegrity.addEventListener('change', () => loadNegatives());
+  }
+
+  // initial load
+  loadNegatives();
+  </script>
+
+<%- include('partials/footer') %>
+</body>
+</html>
