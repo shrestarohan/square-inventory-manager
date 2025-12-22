@@ -422,3 +422,23 @@ tr.missing-row td{ background: rgba(255, 92, 92, .06); }
 /* Make actions column not wrap */
 #tbl td:last-child, #tbl th:last-child{ white-space: nowrap; }
 #tbl th:last-child{ width: 260px; }
+
+.thumb-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.thumb-img.clickable {
+  cursor: pointer;
+}
+
+.thumb-img.clickable:hover {
+  filter: brightness(0.95);
+}
+
+.thumb-updated {
+  outline: 2px solid #2ecc71;
+  outline-offset: 2px;
+  border-radius: 6px;
+}

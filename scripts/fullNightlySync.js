@@ -1,5 +1,5 @@
 // scripts/fullNightlySync.js
-require('dotenv').config();
+require("../lib/loadEnv"); // adjust relative path
 
 const { syncAllMerchants } = require('../lib/inventorySync');
 const { buildGtinMatrix } = require('./buildGtinMatrix');

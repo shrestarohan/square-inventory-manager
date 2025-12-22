@@ -1,5 +1,6 @@
 // scripts/syncSheetToFirestore.js
-require('dotenv').config();
+require("../lib/loadEnv"); // adjust relative path
+
 const { google } = require('googleapis');
 
 const firestore = require('../lib/firestore'); // or './lib/firestore' from root

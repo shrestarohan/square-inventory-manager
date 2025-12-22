@@ -1,4 +1,6 @@
 // scripts/syncSalesDaily.js
+require("../lib/loadEnv"); // adjust relative path
+
 const firestore = require('../lib/firestore');
 const { createSquareClient } = require('../lib/squareClient');
 

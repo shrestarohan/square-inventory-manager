@@ -270,19 +270,90 @@
                 : '')
             : '';
 
+        // Image cell (clickable to upload)
         const imgTd = document.createElement('td');
         imgTd.className = 'thumb-cell';
-        if (r.image_urls && r.image_urls.length) {
-          const img = document.createElement('img');
-          img.src = r.image_urls[0];
-          img.alt = r.item_name || 'Item image';
-          img.loading = 'lazy';
-          img.className = 'thumb-img';
-          imgTd.appendChild(img);
-        } else {
-          imgTd.textContent = '–';
-        }
+
+        const wrap = document.createElement('div');
+        wrap.className = 'thumb-wrap';
+
+        const img = document.createElement('img');
+        img.className = 'thumb-img clickable';
+        img.loading = 'lazy';
+        img.alt = r.item_name || 'Item image';
+
+        const hasImg = r.image_urls && r.image_urls.length;
+        //img.src = hasImg ? r.image_urls[0] : '/img/placeholder-thumb.png'; // or any placeholder you want
+        const PLACEHOLDER_SVG = "data:image/svg+xml;utf8," + encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">
+          <rect width="100%" height="100%" rx="10" ry="10" fill="#f2f2f2"/>
+          <path d="M40 24v32M24 40h32" stroke="#9aa0a6" stroke-width="4" stroke-linecap="round"/>
+        </svg>
+        `);
+        img.src = hasImg ? r.image_urls[0] : PLACEHOLDER_SVG;
+
+        // hidden file input
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.style.display = 'none';
+
+        // click image → open picker
+        img.addEventListener('click', () => fileInput.click());
+
+        // when file selected → upload
+        fileInput.addEventListener('change', async () => {
+          const file = fileInput.files && fileInput.files[0];
+          if (!file) return;
+
+          try {
+            startLoading('');
+
+            // optimistic UI: preview local image immediately
+            const previewUrl = URL.createObjectURL(file);
+            img.src = previewUrl;
+
+            const fd = new FormData();
+            fd.append('image', file);
+
+            // pick ONE identifier strategy:
+            // ✅ best: GTIN-based global update across merchants
+            if (r.gtin) fd.append('gtin', r.gtin);
+
+            // optional extra context (helpful for debugging)
+            if (r.merchant_id) fd.append('merchantId', r.merchant_id);
+            if (r.item_id) fd.append('itemId', r.item_id);
+
+            const res = await fetch('/api/update-item-image', {
+              method: 'POST',
+              body: fd,
+            });
+
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.success) throw new Error(data.error || 'Upload failed');
+
+            // server returns canonical URL(s)
+            if (data.imageUrl) img.src = data.imageUrl;
+            img.classList.add('thumb-updated');
+            setTimeout(() => img.classList.remove('thumb-updated'), 800);
+          } catch (e) {
+            console.error(e);
+            alert('Image update failed: ' + e.message);
+
+            // revert UI if failed
+            img.src = hasImg ? r.image_urls[0] : '/img/placeholder-thumb.png';
+          } finally {
+            stopLoading();
+            // reset input so selecting same file again triggers change
+            fileInput.value = '';
+          }
+        });
+
+        wrap.appendChild(img);
+        wrap.appendChild(fileInput);
+        imgTd.appendChild(wrap);
         tr.appendChild(imgTd);
+
 
         const cells = [
           r.merchant_name,
@@ -317,6 +388,11 @@
           const variationId = r.variation_id;
           const itemId = r.item_id;
 
+          if (!r.gtin) {
+            alert('Missing GTIN for this row. Cannot delete reliably.');
+            return;
+          }
+          
           if (!merchantId || !variationId) {
             alert('Missing merchant/variation id for this row.');
             return;
@@ -334,6 +410,7 @@
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
+                gtin: r.gtin || '',
                 merchantId,
                 variationId,
                 itemId,

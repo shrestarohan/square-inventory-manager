@@ -1,4 +1,6 @@
 // scripts/createUser.js
+require("../lib/loadEnv"); // adjust relative path
+
 const bcrypt = require('bcryptjs');
 const { Firestore } = require('@google-cloud/firestore');
 

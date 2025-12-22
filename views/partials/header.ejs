@@ -72,7 +72,7 @@
 
     </nav>
   </div>
-
+  
   <% var hideFilters = (typeof showFilters !== 'undefined') ? !showFilters : false; %>
 
   <% if (!hideFilters) { %>
@@ -94,6 +94,16 @@
                 <% }) %>
               <% } %>
             </select>
+          </div>
+        <% } else if (currentView === 'gtin') { %>
+          <div class="nav-block">
+            <label style="display:flex;gap:8px;align-items:center;">
+              <span style="opacity:.75;"><strong>Show:</strong></span>
+              <select id="mismatchFilter">
+                <option value="all" selected>All rows</option>
+                <option value="mismatch">Price mismatch only</option>
+              </select>
+            </label>
           </div>
         <% } %>
       </div>

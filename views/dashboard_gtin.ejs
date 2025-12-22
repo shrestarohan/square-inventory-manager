@@ -1,3 +1,10 @@
+<!-- views/dashboard-gtin.ejs
+     Price mismatch dashboard (global consolidated view, no merchant dropdown).
+     Uses:
+       GET /api/gtin-inventory-matrix  -> { rows, locations, nextCursor }
+     Server-side filter:
+       mismatchOnly=1
+-->
 <!DOCTYPE html>
 <html>
 <head>
@@ -19,13 +26,16 @@
     Rows highlighted have different prices across locations.
   </p>
 
+  <!-- ✅ Server-side filter UI, don't add here it's added to header.ejs -->
+
   <table id="inventory-table">
     <thead>
       <tr id="header-row">
+        <th>Delete</th>
         <th class="sortable" data-key="gtin" data-type="string">GTIN</th>
-        <th class="sortable" data-key="item_name" data-type="string">Item</th>
-        <th class="sortable" data-key="category_name" data-type="string">Category</th>
         <th class="sortable" data-key="sku" data-type="string">SKU</th>
+        <th class="sortable" data-key="category_name" data-type="string">Category</th>
+        <th class="sortable" data-key="item_name" data-type="string">Item</th>
         <!-- Location price columns injected by JS -->
       </tr>
     </thead>
@@ -50,7 +60,6 @@
   <%- include('partials/footer') %>
 
   <script>
-
     // header view switch
     const viewSelect = document.getElementById('viewSelect');
     if (viewSelect) viewSelect.addEventListener('change', () => {
@@ -96,7 +105,11 @@
     const rowsPerPageSelect = document.getElementById('rowsPerPage');
     const prevBtn = document.getElementById('prevPage');
     const nextBtn = document.getElementById('nextPage');
-    const searchInput = document.getElementById('search');
+    const searchInput = document.getElementById('search'); // from header partial, optional
+
+    // ✅ server-side mismatch filter
+    const mismatchFilterSelect = document.getElementById('mismatchFilter');
+    let mismatchOnly = false;
 
     let locationKeys = [];
     let headerBuilt = false;
@@ -108,18 +121,32 @@
 
     let currentRows = [];
     let currentSort = { key: null, direction: 'asc', type: 'string' };
-
     let inflight = null;
 
-    // 🔹 Single query string; backend will normalize "200 ml" -> "200ml"
+    // backend normalizes "200 ml" -> "200ml"
     let currentQueryRaw = '';
+
+    function resetPagingAndLoad() {
+      pages = [];
+      cursors = [null];
+      currentPageIndex = 0;
+      loadPage(0);
+    }
+
+    // ✅ Bind mismatch filter AFTER paging vars/functions exist
+    if (mismatchFilterSelect) {
+      mismatchFilterSelect.addEventListener('change', () => {
+        mismatchOnly = mismatchFilterSelect.value === 'mismatch';
+        resetPagingAndLoad();
+      });
+    }
 
     function renderSkeleton() {
       tbody.innerHTML = '';
       for (let i = 0; i < 10; i++) {
         const tr = document.createElement('tr');
         tr.innerHTML =
-          `<td colspan="${4 + (locationKeys?.length || 0)}" ` +
+          `<td colspan="${5 + (locationKeys?.length || 0)}" ` +
           `style="padding:14px;opacity:.35;">&nbsp;</td>`;
         tbody.appendChild(tr);
       }
@@ -137,22 +164,17 @@
     }
 
     function getHeaderCells() {
-      return Array.from(
-        document.querySelectorAll('#inventory-table thead th.sortable')
-      );
+      return Array.from(document.querySelectorAll('#inventory-table thead th.sortable'));
     }
 
     function clearSortIndicators() {
-      getHeaderCells().forEach(th =>
-        th.classList.remove('sorted-asc', 'sorted-desc')
-      );
+      getHeaderCells().forEach(th => th.classList.remove('sorted-asc', 'sorted-desc'));
     }
 
     function sortBy(key, type) {
       if (!key) return;
       if (currentSort.key === key) {
-        currentSort.direction =
-          currentSort.direction === 'asc' ? 'desc' : 'asc';
+        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
       } else {
         currentSort.key = key;
         currentSort.direction = 'asc';
@@ -162,9 +184,7 @@
       clearSortIndicators();
       getHeaderCells().forEach(th => {
         if (th.dataset.key === key) {
-          th.classList.add(
-            currentSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc'
-          );
+          th.classList.add(currentSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc');
         }
       });
 
@@ -173,15 +193,16 @@
 
     async function fetchPage(pageIndexToLoad) {
       const cursor = cursors[pageIndexToLoad] || null;
-    
+
       const params = new URLSearchParams();
       params.set('pageSize', String(rowsPerPage));
       if (cursor) params.set('cursor', cursor);
-
-      // 🔹 Send raw search; backend will lowercase + strip spaces
       if (currentQueryRaw) params.set('q', currentQueryRaw);
 
-      const url = '/api/gtin-matrix?' + params.toString();
+      // ✅ server-side mismatch filter param
+      if (mismatchOnly) params.set('mismatchOnly', '1');
+
+      const url = '/api/gtin-inventory-matrix?' + params.toString();
 
       if (inflight) inflight.abort();
       inflight = new AbortController();
@@ -192,8 +213,8 @@
         headers: { 'Accept': 'application/json' },
         signal: inflight.signal,
       });
-      if (!res.ok) throw new Error(await res.text());
 
+      if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
 
       if (!headerBuilt && data.locations) ensureHeader(data.locations);
@@ -206,10 +227,7 @@
         pricesByLocation: r.pricesByLocation || {},
       }));
 
-      pages[pageIndexToLoad] = {
-        rows,
-        nextCursor: data.nextCursor || null,
-      };
+      pages[pageIndexToLoad] = { rows, nextCursor: data.nextCursor || null };
       cursors[pageIndexToLoad + 1] = data.nextCursor || null;
 
       stopLoading();
@@ -228,6 +246,54 @@
       renderTable();
     }
 
+    async function handleDeleteGtin(event) {
+      const btn = event.target;
+      const gtin = (btn.dataset.gtin || '').trim();
+      const itemName = (btn.dataset.itemName || '').trim();
+
+      if (!gtin) return alert('Missing GTIN.');
+
+      const ok = confirm(
+        `Delete this item everywhere?\n\nGTIN: ${gtin}\nItem: ${itemName || '(no name)'}\n\nThis will remove it from Firestore and Square for each merchant where present.`
+      );
+      if (!ok) return;
+
+      btn.disabled = true;
+
+      try {
+        // ✅ Use the SAME endpoint your dashboard uses.
+        // If your dashboard endpoint is different, change this URL to match it.
+        const res = await fetch('/api/delete-item', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gtin }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || 'Delete failed');
+
+        // ✅ Remove the deleted row from cached pages so it disappears immediately
+        for (const p of pages) {
+          if (!p || !p.rows) continue;
+          p.rows = p.rows.filter(row => row.gtin !== gtin);
+        }
+        currentRows = currentRows.filter(row => row.gtin !== gtin);
+
+        renderTable();
+
+        // Optional: if you prefer a full refresh (slower but simplest)
+        // resetPagingAndLoad();
+
+      } catch (err) {
+        console.error(err);
+        alert('Failed to delete: ' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+
+    // Used only for row highlighting
     function isMismatchRow(r) {
       const prices = [];
       for (const locKey of locationKeys) {
@@ -251,10 +317,8 @@
           const vb = b[key];
 
           if (type === 'number') {
-            const na =
-              va == null || isNaN(va) ? -Infinity : Number(va);
-            const nb =
-              vb == null || isNaN(vb) ? -Infinity : Number(vb);
+            const na = va == null || isNaN(va) ? -Infinity : Number(va);
+            const nb = vb == null || isNaN(vb) ? -Infinity : Number(vb);
             if (na < nb) return -1 * dir;
             if (na > nb) return 1 * dir;
             return 0;
@@ -269,14 +333,10 @@
       }
 
       if (!currentRows.length) {
-        tbody.innerHTML =
-          `<tr><td colspan="${4 + locationKeys.length}">No GTIN rows found.</td></tr>`;
-        pageInfo.textContent = `Page ${currentPageIndex + 1} (0 rows)`;
+        tbody.innerHTML = `<tr><td colspan="${5 + locationKeys.length}">No GTIN rows found.</td></tr>`;
+        pageInfo.textContent = `Page ${currentPageIndex + 1} (${mismatchOnly ? 'Mismatch only' : 'All'} — 0 rows)`;
         prevBtn.disabled = currentPageIndex <= 0;
-        nextBtn.disabled = !(
-          pages[currentPageIndex] &&
-          pages[currentPageIndex].nextCursor
-        );
+        nextBtn.disabled = !(pages[currentPageIndex] && pages[currentPageIndex].nextCursor);
         return;
       }
 
@@ -284,12 +344,29 @@
         const tr = document.createElement('tr');
         if (isMismatchRow(r)) tr.classList.add('mismatch-row');
 
-        // GTIN
+        // --- delete button (last column) ---
+        const tdDel = document.createElement('td');
+        const delBtn = document.createElement('button');
+        delBtn.textContent = 'Delete';
+        delBtn.className = 'btn btn-danger delete-btn';
+        delBtn.dataset.gtin = r.gtin || '';
+        delBtn.dataset.itemName = r.item_name || '';
+        delBtn.addEventListener('click', handleDeleteGtin);
+        tdDel.appendChild(delBtn);
+        tr.appendChild(tdDel);
+
         const tdGtin = document.createElement('td');
         tdGtin.textContent = r.gtin;
         tr.appendChild(tdGtin);
 
-        // Name editable
+        const tdSku = document.createElement('td');
+        tdSku.textContent = r.sku || '';
+        tr.appendChild(tdSku);
+        
+        const tdCat = document.createElement('td');
+        tdCat.textContent = r.category_name || '';
+        tr.appendChild(tdCat);
+
         const tdName = document.createElement('td');
         const nameInput = document.createElement('input');
         nameInput.type = 'text';
@@ -300,17 +377,6 @@
         tdName.appendChild(nameInput);
         tr.appendChild(tdName);
 
-        // Category
-        const tdCat = document.createElement('td');
-        tdCat.textContent = r.category_name || '';
-        tr.appendChild(tdCat);
-
-        // SKU
-        const tdSku = document.createElement('td');
-        tdSku.textContent = r.sku || '';
-        tr.appendChild(tdSku);
-
-        // Price cells
         locationKeys.forEach(locKey => {
           const td = document.createElement('td');
           const info = r.pricesByLocation?.[locKey];
@@ -320,8 +386,7 @@
             input.type = 'number';
             input.step = '0.01';
             input.className = 'price-input';
-            if (info.price != null)
-              input.value = Number(info.price).toFixed(2);
+            if (info.price != null) input.value = Number(info.price).toFixed(2);
 
             input.dataset.merchantId = info.merchant_id || '';
             input.dataset.variationId = info.variation_id || '';
@@ -334,39 +399,31 @@
           }
 
           tr.appendChild(td);
+
         });
 
         tbody.appendChild(tr);
       }
 
-      const hasNext =
-        pages[currentPageIndex] &&
-        pages[currentPageIndex].nextCursor;
-      pageInfo.textContent = `Page ${currentPageIndex + 1} (rows: ${currentRows.length})`;
+      const hasNext = pages[currentPageIndex] && pages[currentPageIndex].nextCursor;
+      pageInfo.textContent = `Page ${currentPageIndex + 1} (${mismatchOnly ? 'Mismatch only' : 'All'} — rows: ${currentRows.length})`;
       prevBtn.disabled = currentPageIndex <= 0;
       nextBtn.disabled = !hasNext;
     }
 
-    // sorting events
+    // sorting
     getHeaderCells().forEach(th => {
-      th.addEventListener('click', () =>
-        sortBy(th.dataset.key, th.dataset.type || 'string')
-      );
+      th.addEventListener('click', () => sortBy(th.dataset.key, th.dataset.type || 'string'));
     });
 
-    // --- DB-backed search (debounced, backend handles space normalization) ---
+    // search
     let searchDebounce = null;
     if (searchInput) {
       searchInput.addEventListener('input', () => {
         clearTimeout(searchDebounce);
         searchDebounce = setTimeout(() => {
-          const raw = (searchInput.value || '').trim().toLowerCase();
-          currentQueryRaw = raw; // e.g. "200 ml"
-
-          pages = [];
-          cursors = [null];
-          currentPageIndex = 0;
-          loadPage(0);
+          currentQueryRaw = (searchInput.value || '').trim().toLowerCase();
+          resetPagingAndLoad();
         }, 250);
       });
     }
@@ -374,10 +431,7 @@
     // paging
     rowsPerPageSelect.addEventListener('change', () => {
       rowsPerPage = Number(rowsPerPageSelect.value) || 50;
-      pages = [];
-      cursors = [null];
-      currentPageIndex = 0;
-      loadPage(0);
+      resetPagingAndLoad();
     });
 
     prevBtn.addEventListener('click', () => {
@@ -398,8 +452,7 @@
       const variationId = input.dataset.variationId;
       const currency = input.dataset.currency || 'USD';
 
-      if (!merchantId || !variationId)
-        return alert('Missing merchant/variation info.');
+      if (!merchantId || !variationId) return alert('Missing merchant/variation info.');
 
       const numericPrice = Number(newValue);
       if (!newValue || Number.isNaN(numericPrice) || numericPrice < 0) {
@@ -414,22 +467,13 @@
         const res = await fetch('/api/update-price', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            merchantId,
-            variationId,
-            price: numericPrice,
-            currency,
-          }),
+          body: JSON.stringify({ merchantId, variationId, price: numericPrice, currency }),
         });
         const data = await res.json();
-        if (!res.ok || !data.success)
-          throw new Error(data.error || 'Failed to update price');
+        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update price');
 
         input.classList.add('price-updated');
-        setTimeout(
-          () => input.classList.remove('price-updated'),
-          800
-        );
+        setTimeout(() => input.classList.remove('price-updated'), 800);
       } catch (err) {
         console.error(err);
         input.classList.add('price-error');
@@ -461,14 +505,10 @@
           body: JSON.stringify({ gtin, itemName: newName }),
         });
         const data = await res.json();
-        if (!res.ok || !data.success)
-          throw new Error(data.error || 'Failed to update item name');
+        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update item name');
 
         input.classList.add('name-updated');
-        setTimeout(
-          () => input.classList.remove('name-updated'),
-          800
-        );
+        setTimeout(() => input.classList.remove('name-updated'), 800);
       } catch (err) {
         console.error(err);
         input.classList.add('name-error');
@@ -478,15 +518,14 @@
       }
     }
 
-    // initial load
+    // initial load (global consolidated view)
     (async () => {
       try {
         await loadPage(0);
       } catch (e) {
         console.error(e);
         stopLoading();
-        tbody.innerHTML =
-          `<tr><td colspan="4">Failed to load. Check server logs.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4">Failed to load. Check server logs.</td></tr>`;
       }
     })();
   </script>

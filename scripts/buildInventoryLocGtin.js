@@ -1,4 +1,4 @@
-require('dotenv').config();
+require("../lib/loadEnv"); // adjust relative path
 const firestore = require('../lib/firestore');
 
 function safeLower(v) {

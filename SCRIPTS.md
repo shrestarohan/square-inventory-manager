@@ -338,14 +338,19 @@ You can adapt similar lines for `sync:gtin-meta` and `sync:gtin-names:square`.
 
 # - 4. Schedule Job
 
+  # every night at 3AM, adjust as you like
+
   ```bash
+  
   gcloud scheduler jobs create http full-nightly-sync \
-    --schedule="0 3 * * *" \  # every night at 3AM, adjust as you like
+    --location=us-central1 \
+    --schedule="0 3 * * *" \
     --time-zone="America/Chicago" \
     --http-method=POST \
-    --uri="https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/square-inventory-480509/jobs/full-nightly-sync:run" \
-    --oauth-service-account-email="YOUR_SCHEDULER_SA@PROJECT_ID.iam.gserviceaccount.com" \
+    --uri="https://run.googleapis.com/v2/projects/square-inventory-480509/locations/us-central1/jobs/full-nightly-sync:run" \
+    --oauth-service-account-email="976955084378-compute@developer.gserviceaccount.com" \
     --oauth-token-scope="https://www.googleapis.com/auth/cloud-platform"
+
   ```
 
 
