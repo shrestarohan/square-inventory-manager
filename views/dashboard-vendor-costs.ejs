@@ -49,7 +49,6 @@
             <th>Vendor Name</th>
             <th>Unit Cost</th>
             <th>Updated At</th>
-            <th>Save</th>
             <th>Status</th>
           </tr>
         </thead>
@@ -144,7 +143,7 @@
       tbody.innerHTML = '';
       for (let i = 0; i < 10; i++) {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td colspan="8" style="padding:14px;opacity:.55;">&nbsp;</td>`;
+        tr.innerHTML = `<td colspan="7" style="padding:14px;opacity:.55;">&nbsp;</td>`;
         tbody.appendChild(tr);
       }
     }
@@ -297,7 +296,6 @@
       const gtin = rowKey(row);
       if (!gtin) return;
 
-      const saveBtn = tr.querySelector('.btn-save');
       const body = getRowValuesFromTr(tr);
 
       // quick validation (optional)
@@ -305,8 +303,6 @@
         setRowStatus(tr, 'err', 'Unit cost must be a valid number');
         return;
       }
-
-      saveBtn.disabled = true;
 
       try {
         startLoading();
@@ -345,7 +341,6 @@
         setRowStatus(tr, 'err', 'Save failed');
       } finally {
         stopLoading();
-        saveBtn.disabled = false;
       }
     }
 
@@ -359,7 +354,7 @@
 
       if (!rows.length) {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td colspan="8">No GTIN metadata found.</td>`;
+        tr.innerHTML = `<td colspan="7">No GTIN metadata found.</td>`;
         tbody.appendChild(tr);
       } else {
         rows.forEach((row) => {
@@ -384,16 +379,11 @@
             <td data-td="unitCost"><input type="number" step="0.01" value="${row.unitCost ?? ''}" data-field="unitCost" /></td>
 
             <td class="updatedAt">${escapeHtml(row.updatedAt || '')}</td>
-            <td><button type="button" class="btn-save">Save</button></td>
             <td><span class="row-status"></span></td>
           `;
 
           // missing highlight
           updateMissingStyling(tr, isMissing(row));
-
-          // save button
-          const saveBtn = tr.querySelector('.btn-save');
-          saveBtn.addEventListener('click', () => saveRow(tr, row));
 
           // Enter-to-save + blur auto-save
           const inputs = Array.from(tr.querySelectorAll('input[data-field]'));
@@ -457,7 +447,7 @@
       loadPage(0).catch((e) => {
         console.error(e);
         stopLoading();
-        tbody.innerHTML = '<tr><td colspan="8">Failed to load. Check server logs.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7">Failed to load. Check server logs.</td></tr>';
       });
     }
 
@@ -497,7 +487,7 @@
     loadPage(0).catch((e) => {
       console.error(e);
       stopLoading();
-      tbody.innerHTML = '<tr><td colspan="8">Failed to load. Check server logs.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7">Failed to load. Check server logs.</td></tr>';
     });
   </script>
 </body>

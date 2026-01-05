@@ -1,5 +1,5 @@
 // scripts/backfillSearchFields.js
-require('dotenv').config();
+require("../lib/loadEnv"); // adjust relative path
 const firestore = require('../lib/firestore');
 
 const BATCH_SIZE = 400;
