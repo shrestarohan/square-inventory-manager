@@ -23,9 +23,11 @@ const app = express();
 // Core middleware
 // -----------------------------
 
-// (optional) request logging
 app.use((req, res, next) => {
-  console.log('REQ:', req.method, req.originalUrl);
+  // request logging
+  console.log("REQ:", req.method, req.originalUrl);
+  // locals for EJS
+  res.locals.dbName = process.env.FIRESTORE_DATABASE_ID;
   next();
 });
 
@@ -62,6 +64,7 @@ app.set('views', path.join(__dirname, 'views'));
 
 // Shared locals (env + user + syncStatus)
 app.use(appContext({ firestore }));
+
 
 // -----------------------------
 // Square clients used by routers
@@ -139,7 +142,7 @@ app.use(require('./routes/gtinInventoryMatrixConsolidated')({
 }));
 
 // If you still use per-merchant GTIN matrix docs somewhere:
-app.use(require('./routes/gtinMatrix')({
+app.use(require('./routes/gtinInventoryMatrix')({
   firestore,
   requireLogin,
 }));
@@ -157,10 +160,40 @@ app.use('/api', require('./routes/deleteGtin')({
 }));
 
 const buildItemImagesRouter = require('./routes/itemImages');
+console.log('itemImages export typeof:', typeof buildItemImagesRouter);
 app.use(buildItemImagesRouter({ firestore, requireLogin }));
 
+const copyItemInfoRouter = require("./routes/copyItemInfo");
+console.log('copyItemInfo export typeof:', typeof copyItemInfoRouter);
+app.use(copyItemInfoRouter({ requireLogin, firestore }));
+
+app.use(require('./routes/squareCategories')({
+  firestore,
+  requireLogin,
+}));
+
+app.use(require("./routes/categoryMatrix")({ firestore, requireLogin }));
+
+app.use(require("./routes/categoryActions")({ firestore, requireLogin }));
+
+app.use(require("./routes/categorySync")({ requireLogin }));
+
+const categoriesRenameRouter = require("./routes/categoriesRename");
+app.use(categoriesRenameRouter({ requireLogin, firestore }));
+
+const buildCategoriesListRouter = require("./routes/categoriesList");
+app.use(buildCategoriesListRouter({ firestore, requireLogin }));
+
+const buildItemsSetCategoryIdRouter = require("./routes/itemsSetCategoryId");
+app.use(buildItemsSetCategoryIdRouter({ firestore, requireLogin }));
+
+app.use(require('./routes/itemsUpdateFields')({ firestore, requireLogin }));
+
+app.use(require('./routes/replenishment')({ firestore, requireLogin }));
+
 // AI Agent routes
-app.use('/api/ai', require('./routes/aiAgent'));
+app.use(require("./routes/replenishmentAiPage")({ firestore, requireLogin }));
+app.use(require("./routes/replenishmentAiApi")({ firestore, requireLogin }));
 
 // -----------------------------
 // Pages (all res.render routes)

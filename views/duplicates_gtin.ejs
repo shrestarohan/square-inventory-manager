@@ -13,20 +13,11 @@
         merchantId: null,
         merchants: typeof merchants !== 'undefined' ? merchants : [],
         activePage: 'duplicates-gtin',
-        showFilters: false
+        showFilters: true
       }) %>
 
   <div style="padding: 14px 16px;">
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      <label><strong>Merchant:</strong></label>
-      <select id="merchantPick">
-        <option value="">Select merchant…</option>
-        <% (merchants || []).forEach(m => { %>
-          <option value="<%= m.id %>"><%= m.display_name || m.id %></option>
-        <% }) %>
-      </select>
-
-      <input id="filter" placeholder="Filter results (gtin, item, sku)..." style="min-width:320px;" />
       <span id="summary" style="opacity:.8;font-size:12px;"></span>
     </div>
 
@@ -82,8 +73,8 @@
       }, 180);
     }
 
-    const merchantPick = document.getElementById('merchantPick');
-    const filter = document.getElementById('filter');
+    const merchantSelect = document.getElementById('merchantSelect');
+    const filter = document.getElementById('search');
     const tbody = document.getElementById('dup-body');
     const summary = document.getElementById('summary');
 
@@ -170,7 +161,7 @@
     }
 
     async function loadDupes() {
-      const merchantId = merchantPick.value;
+      const merchantId = merchantSelect.value;
       if (!merchantId) return;
 
       startLoading();
@@ -181,7 +172,7 @@
         params.set('onlyDuplicates', '1');       // ✅ server-side filter
         params.set('q', '');                     // optional: leave blank to paginate by docId
 
-        const res = await fetch('/api/gtin-matrix?' + params.toString(), {
+        const res = await fetch('/api/gtin-duplicates?' + params.toString(), {
           headers: { 'Accept': 'application/json' }
         });
         const data = await res.json();
@@ -203,7 +194,7 @@
       }
     }
 
-    merchantPick.addEventListener('change', loadDupes);
+    merchantSelect.addEventListener('change', loadDupes);
     filter.addEventListener('input', () => lastRows && renderRows(lastRows));
   </script>
 </body>

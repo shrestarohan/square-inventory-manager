@@ -15,7 +15,7 @@
             – <%= merchant.business_name %>
           <% } else if (currentView === 'item') { %>
             – All Merchants
-          <% } else if (currentView === 'gtin') { %>
+          <% } else if (currentView === 'duplicates') { %>
             – GTIN Master
           <% } %>
         </p>
@@ -68,8 +68,11 @@
         Reports
       </a>
 
-      <a href="/reorder" class="nav-link <%= activePage === 'reorder' ? 'active' : '' %>">Reorder</a>
-
+      <a href="/replenishment-ai" class="nav-link <%= activePage === 'reorder' ? 'active' : '' %>">Reorder</a>
+    
+      <a href="/category-matrix" class="nav-link <%= activePage === 'category-matrix' ? 'active' : '' %>">
+        Category Matrix
+      </a>
     </nav>
   </div>
   
@@ -79,16 +82,17 @@
     <!-- Row 3: Filters (merchant + search) -->
     <div class="top-row top-row-filters">
       <div class="nav-left">
-        <% if (currentView === 'item') { %>
+        <% const view = (typeof currentView !== 'undefined' && currentView) ? currentView : 'item'; %>
+        <% if (view === 'item' || view === 'duplicates' || view === 'replenishment-ai') { %>
           <div class="nav-block">
-            <label for="merchantSelect"><strong>Merchant:</strong></label>
+            <label for="merchantSelect"><strong>Businesses:</strong></label>
             <select id="merchantSelect">
-              <option value="/dashboard" <%= !merchantId ? 'selected' : '' %>>
-                All Merchants (Master)
+              <option value="" <%= !merchantId ? 'selected' : '' %>>
+                All Businesses
               </option>
               <% if (merchants && merchants.length) { %>
                 <% merchants.forEach(m => { %>
-                  <option value="/dashboard/<%= m.id %>" <%= merchantId === m.id ? 'selected' : '' %>>
+                  <option value="/<%= m.id %>" <%= merchantId === m.id ? 'selected' : '' %>>
                     <%= m.business_name || m.id %>
                   </option>
                 <% }) %>
@@ -96,7 +100,7 @@
             </select>
           </div>
         <% } else if (currentView === 'gtin') { %>
-          <div class="nav-block">
+          <div class="nav-block" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
             <label style="display:flex;gap:8px;align-items:center;">
               <span style="opacity:.75;"><strong>Show:</strong></span>
               <select id="mismatchFilter">
@@ -108,11 +112,13 @@
         <% } %>
       </div>
 
+      <% if (view === 'item' || view === 'gtin' || view === 'duplicates' || view === 'vendorCosts') { %>
       <div class="filters" style="display:flex;align-items:center;gap:8px;">
         <input id="search" placeholder="Search by item, SKU, GTIN, merchant, location, category..." />
         <span id="mini-spinner" class="mini-spinner" aria-hidden="true"></span>
         <span id="load-status"></span>
       </div>
+      <% } %>
     </div>
   <% } %>
 </div>

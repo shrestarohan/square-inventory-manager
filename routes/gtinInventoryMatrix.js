@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 module.exports = function buildGtinInventoryMatrixRouter({ requireLogin, firestore }) {
-  router.get("/api/gtin-inventory-matrix", requireLogin, async (req, res) => {
+  router.get("/api/duplicates-inventory-matrix", requireLogin, async (req, res) => {
     try {
       const pageSize = Math.min(Number(req.query.pageSize) || 50, 250);
       const cursor = req.query.cursor || null;

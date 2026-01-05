@@ -16,19 +16,6 @@
     activePage: 'inventory-integrity'
   }) %>
 
-  <div class="container" style="padding: 16px;">
-    <div style="margin: 10px 0;">
-      <label for="merchantSelectIntegrity">Merchant:</label>
-      <select id="merchantSelectIntegrity" style="min-width: 360px;">
-        <option value="">All merchants</option>
-        <% (merchants || []).forEach(m => { %>
-          <option value="<%= m.id %>">
-            <%= (m.business_name || m.id) %>
-          </option>
-        <% }) %>
-      </select>
-    </div>
-
     <p id="status"></p>
 
     <table id="tbl" style="width:100%; border-collapse: collapse;">
@@ -155,7 +142,7 @@
   }
 
   async function loadNegatives() {
-    const merchantId = (document.getElementById('merchantSelectIntegrity')?.value || '').trim();
+    const merchantId = (document.getElementById('merchantSelect')?.value || '').trim();
 
     const params = new URLSearchParams();
     params.set('limit', '200');
@@ -305,9 +292,9 @@
     }[c]));
   }
 
-  const merchantSelectIntegrity = document.getElementById('merchantSelectIntegrity');
-  if (merchantSelectIntegrity) {
-    merchantSelectIntegrity.addEventListener('change', () => loadNegatives());
+  const merchantSelect = document.getElementById('merchantSelect');
+  if (merchantSelect) {
+    merchantSelect.addEventListener('change', () => loadNegatives());
   }
 
   // initial load

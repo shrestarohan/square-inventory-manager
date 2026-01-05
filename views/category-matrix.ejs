@@ -1,0 +1,613 @@
+<!-- views/category-matrix.ejs
+     Consolidated Category Matrix (like price mismatch dashboard)
+
+     Uses:
+       GET  /api/category-matrix              -> { merchants, rows }
+       POST /api/categories/copy              -> copy category to missing merchant (Square + Firestore)
+       POST /api/categories/delete-all        -> delete category in all merchants (Square + Firestore)
+       POST /api/categories/sync-from-square  -> sync categories from Square into Firestore
+       POST /api/categories/rename            -> rename category in ONE merchant (Square + Firestore)
+
+     Notes:
+       - Highlights rows with missing categories (reuses .mismatch-row if present)
+       - Adds per-cell Copy buttons for missing merchants
+       - Adds per-row Delete (All Merchants) action
+       - Adds Sync from Square button (all merchants or one merchant)
+       - Inline edit: click Edit, then Enter or blur to save, Esc to cancel
+       - Prevents repeated alerts on error (Enter + blur double-submit)
+-->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Category Matrix</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <%- include('partials/header', {
+    pageTitle: 'Category Matrix',
+    currentView: 'categories',
+    activePage: 'category-matrix',
+    merchants: typeof merchants !== 'undefined' ? merchants : [],
+    showFilters: false
+  }) %>
+
+  <p class="hint">
+    Consolidated view of Square categories across all merchants. Shows missing categories and naming mismatches.
+  </p>
+
+  <!-- Local filters for this page -->
+  <div class="top-row top-row-filters" style="margin:12px 0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+    <input id="search" placeholder="Search category name..." style="min-width:280px;" />
+
+    <label style="display:flex; gap:8px; align-items:center;">
+      <span style="opacity:.75;"><strong>Show:</strong></span>
+      <select id="filterMode">
+        <option value="all" selected>All</option>
+        <option value="missing">Missing anywhere</option>
+        <option value="mismatch">Name mismatch</option>
+      </select>
+    </label>
+
+    <label style="display:flex; gap:8px; align-items:center;">
+      <span style="opacity:.75;"><strong>Sync:</strong></span>
+      <select id="syncMerchantSelect">
+        <option value="">All Merchants</option>
+        <!-- options injected by JS after load() -->
+      </select>
+    </label>
+
+    <button id="syncBtn" class="btn btn-sm btn-primary" type="button">Sync from Square</button>
+    <button id="refreshBtn" class="btn btn-sm btn-outline" type="button">Refresh</button>
+
+    <span id="statusText" style="opacity:.7;"></span>
+  </div>
+
+  <table id="cat-table">
+    <thead>
+      <tr id="header-row">
+        <th class="sortable" data-key="canonical_name" data-type="string">Category</th>
+        <th>Status</th>
+        <th>Actions</th>
+        <!-- Merchant columns injected by JS -->
+      </tr>
+    </thead>
+    <tbody id="body"></tbody>
+  </table>
+
+  <%- include('partials/footer') %>
+
+  <script>
+    // loader (from header.ejs if present)
+    const topLoader = document.getElementById('top-loader');
+    const topLoaderBar = document.getElementById('top-loader-bar');
+    const miniSpinner = document.getElementById('mini-spinner');
+
+    let loaderTimer = null;
+    function startLoading() {
+      if (topLoader) topLoader.classList.add('is-on');
+      if (miniSpinner) miniSpinner.classList.add('is-on');
+      if (topLoaderBar) topLoaderBar.style.width = '10%';
+
+      let p = 10;
+      clearInterval(loaderTimer);
+      loaderTimer = setInterval(() => {
+        p = Math.min(p + Math.random() * 12, 92);
+        if (topLoaderBar) topLoaderBar.style.width = p.toFixed(0) + '%';
+      }, 180);
+    }
+
+    function stopLoading() {
+      clearInterval(loaderTimer);
+      loaderTimer = null;
+
+      if (topLoaderBar) topLoaderBar.style.width = '100%';
+      setTimeout(() => {
+        if (topLoader) topLoader.classList.remove('is-on');
+        if (miniSpinner) miniSpinner.classList.remove('is-on');
+        if (topLoaderBar) topLoaderBar.style.width = '0%';
+      }, 180);
+    }
+
+    const headerRow = document.getElementById('header-row');
+    const tbody = document.getElementById('body');
+
+    const searchInput = document.getElementById('search');
+    const filterMode = document.getElementById('filterMode');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const statusText = document.getElementById('statusText');
+
+    const syncBtn = document.getElementById('syncBtn');
+    const syncMerchantSelect = document.getElementById('syncMerchantSelect');
+
+    let merchants = [];
+    let rows = [];
+
+    let currentSort = { key: null, direction: 'asc', type: 'string' };
+
+    function setStatus(msg) {
+      if (statusText) statusText.textContent = msg || '';
+    }
+
+    // ---- alert throttling (prevents spam) ----
+    let lastAlertAt = 0;
+    function alertOnce(msg) {
+      const now = Date.now();
+      if (now - lastAlertAt < 1500) return;
+      lastAlertAt = now;
+      alert(msg);
+    }
+
+    function ensureHeader(ms) {
+      // keep first 3 headers: Category, Status, Actions
+      while (headerRow.children.length > 3) headerRow.removeChild(headerRow.lastChild);
+
+      ms.forEach(m => {
+        const th = document.createElement('th');
+        th.textContent = m.name || m.id;
+        headerRow.appendChild(th);
+      });
+    }
+
+    function badge(text) {
+      return `<span style="padding:2px 8px;border:1px solid #eee;border-radius:999px;font-size:12px;opacity:.8;">${text}</span>`;
+    }
+
+    function populateSyncMerchantSelect(ms) {
+      if (!syncMerchantSelect) return;
+      // keep first option (All Merchants)
+      while (syncMerchantSelect.options.length > 1) syncMerchantSelect.remove(1);
+
+      (ms || []).forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name || m.id;
+        syncMerchantSelect.appendChild(opt);
+      });
+    }
+
+    function clearSortIndicators() {
+      const ths = Array.from(document.querySelectorAll('#cat-table thead th.sortable'));
+      ths.forEach(th => th.classList.remove('sorted-asc', 'sorted-desc'));
+    }
+
+    function applySort() {
+      if (!currentSort.key) return;
+
+      const { key, type, direction } = currentSort;
+      const dir = direction === 'asc' ? 1 : -1;
+
+      rows.sort((a, b) => {
+        const va = a[key];
+        const vb = b[key];
+        if (type === 'number') {
+          const na = va == null || isNaN(va) ? -Infinity : Number(va);
+          const nb = vb == null || isNaN(vb) ? -Infinity : Number(vb);
+          if (na < nb) return -1 * dir;
+          if (na > nb) return  1 * dir;
+          return 0;
+        } else {
+          const sa = (va ?? '').toString().toLowerCase();
+          const sb = (vb ?? '').toString().toLowerCase();
+          if (sa < sb) return -1 * dir;
+          if (sa > sb) return  1 * dir;
+          return 0;
+        }
+      });
+    }
+
+    function sortBy(key, type) {
+      if (!key) return;
+      if (currentSort.key === key) {
+        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        currentSort.key = key;
+        currentSort.direction = 'asc';
+      }
+      currentSort.type = type || 'string';
+
+      clearSortIndicators();
+      const ths = Array.from(document.querySelectorAll('#cat-table thead th.sortable'));
+      ths.forEach(th => {
+        if (th.dataset.key === key) {
+          th.classList.add(currentSort.direction === 'asc' ? 'sorted-asc' : 'sorted-desc');
+        }
+      });
+
+      render();
+    }
+
+    function render() {
+      const mode = (filterMode?.value || 'all').toLowerCase();
+      const q = (searchInput?.value || '').trim().toLowerCase();
+
+      tbody.innerHTML = '';
+
+      // IMPORTANT: sort rows in place first, then derive filtered list in same order
+      applySort();
+
+      const filtered = rows.filter(r => {
+        if (q && !(r.canonical_name || '').toLowerCase().includes(q)) return false;
+        if (mode === 'missing' && !(r.missingCount > 0)) return false;
+        if (mode === 'mismatch' && !r.nameMismatch) return false;
+        return true;
+      });
+
+      if (!filtered.length) {
+        tbody.innerHTML = `<tr><td colspan="${3 + merchants.length}">No rows.</td></tr>`;
+        return;
+      }
+
+      for (const r of filtered) {
+        const tr = document.createElement('tr');
+
+        if (r.missingCount > 0) tr.classList.add('mismatch-row');
+        if (r.nameMismatch) tr.style.outline = '1px dashed rgba(0,0,0,.15)';
+
+        // Category name
+        const tdName = document.createElement('td');
+        tdName.textContent = r.canonical_name || r.category_key || '';
+        tr.appendChild(tdName);
+
+        // Status
+        const tdStatus = document.createElement('td');
+        const parts = [];
+        if (r.missingCount > 0) parts.push(badge(`Missing: ${r.missingCount}`));
+        if (r.nameMismatch) parts.push(badge('Name mismatch'));
+        if (!parts.length) parts.push(badge('OK'));
+        tdStatus.innerHTML = parts.join(' ');
+        tr.appendChild(tdStatus);
+
+        // Actions (Delete all merchants)
+        const tdActions = document.createElement('td');
+        const delBtn = document.createElement('button');
+        delBtn.textContent = 'Delete (All)';
+        delBtn.className = 'btn btn-danger btn-sm';
+        delBtn.addEventListener('click', async () => {
+          const ok = confirm(`Delete this category in ALL merchants?\n\nCategory: ${r.canonical_name}`);
+          if (!ok) return;
+
+          delBtn.disabled = true;
+          try {
+            startLoading();
+            setStatus('Deleting category across all merchants...');
+            const res = await fetch('/api/categories/delete-all', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ categoryName: r.canonical_name }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.success) throw new Error(data.error || 'Delete failed');
+
+            await load(); // refresh
+          } catch (e) {
+            console.error(e);
+            alertOnce('Delete failed: ' + e.message);
+          } finally {
+            stopLoading();
+            setStatus('');
+            delBtn.disabled = false;
+          }
+        });
+        tdActions.appendChild(delBtn);
+        tr.appendChild(tdActions);
+
+        // Merchant columns
+        merchants.forEach(m => {
+          const info = r.byMerchant?.[m.id];
+          const td = document.createElement('td');
+
+          if (!info) {
+            td.innerHTML = `<span style="opacity:.35;">— missing —</span><br/>`;
+
+            const copyBtn = document.createElement('button');
+            copyBtn.textContent = 'Copy';
+            copyBtn.className = 'btn btn-sm btn-primary';
+
+            copyBtn.addEventListener('click', async () => {
+              const ok = confirm(`Copy category "${r.canonical_name}" to ${m.name || m.id}?`);
+              if (!ok) return;
+
+              const fromMid = merchants.find(mm => r.byMerchant?.[mm.id])?.id;
+              const src = fromMid ? r.byMerchant[fromMid] : null;
+
+              if (!fromMid || !src) {
+                alertOnce('No source merchant found that has this category.');
+                return;
+              }
+
+              copyBtn.disabled = true;
+              try {
+                startLoading();
+                setStatus(`Copying to ${m.name || m.id}...`);
+
+                const res = await fetch('/api/categories/copy', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    fromMerchantId: fromMid,
+                    toMerchantId: m.id,
+                    categoryId: src?.category_id || null,
+                    categoryName: r.canonical_name,
+                  }),
+                });
+
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success) throw new Error(data.error || 'Copy failed');
+
+                await load();
+              } catch (e) {
+                console.error(e);
+                alertOnce('Copy failed: ' + e.message);
+              } finally {
+                stopLoading();
+                setStatus('');
+                copyBtn.disabled = false;
+              }
+            });
+
+            td.appendChild(copyBtn);
+          } else {
+            const originalName = (info.category_name || '').toString();
+            const id = (info.category_id || '').toString();
+
+            const wrap = document.createElement('div');
+            wrap.style.display = 'flex';
+            wrap.style.flexDirection = 'column';
+            wrap.style.gap = '6px';
+
+            // Row: name + edit button
+            const top = document.createElement('div');
+            top.style.display = 'flex';
+            top.style.alignItems = 'center';
+            top.style.gap = '8px';
+            top.style.justifyContent = 'space-between';
+
+            const nameContainer = document.createElement('div');
+            nameContainer.style.flex = '1';
+
+            const nameSpan = document.createElement('div');
+            nameSpan.textContent = originalName;
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = originalName;
+            input.style.display = 'none';
+            input.style.minWidth = '220px';
+
+            nameContainer.appendChild(nameSpan);
+            nameContainer.appendChild(input);
+
+            const editBtn = document.createElement('button');
+            editBtn.textContent = 'Edit';
+            editBtn.className = 'btn btn-sm btn-outline';
+            editBtn.style.padding = '2px 8px';
+
+            top.appendChild(nameContainer);
+            top.appendChild(editBtn);
+
+            const meta = document.createElement('div');
+            meta.style.opacity = '.5';
+            meta.style.fontSize = '12px';
+            meta.textContent = id;
+
+            wrap.appendChild(top);
+            wrap.appendChild(meta);
+
+            // ---- inline edit state ----
+            let saving = false;
+            let cancelled = false;
+            let justSubmittedByEnter = false;
+            let lastErrorAt = 0;
+
+            function showErrorOnce(msg) {
+              const now = Date.now();
+              if (now - lastErrorAt < 1500) return;
+              lastErrorAt = now;
+              alert(msg);
+            }
+
+            function enterEdit() {
+              cancelled = false;
+              input.value = originalName;
+              nameSpan.style.display = 'none';
+              input.style.display = 'block';
+              editBtn.disabled = true;
+              input.disabled = false;
+              input.focus();
+              input.select();
+            }
+
+            function exitEditNoSave() {
+              input.style.display = 'none';
+              nameSpan.style.display = 'block';
+              editBtn.disabled = false;
+            }
+
+            async function saveIfChanged(trigger) {
+              if (saving) return;
+              if (cancelled) return exitEditNoSave();
+
+              const newName = (input.value || '').trim();
+              if (!newName) {
+                showErrorOnce('Category name cannot be empty.');
+                input.focus();
+                input.select();
+                return;
+              }
+
+              if (newName === originalName) {
+                exitEditNoSave();
+                return;
+              }
+
+              saving = true;
+              input.disabled = true;
+
+              try {
+                startLoading();
+                setStatus(`Renaming in ${m.name || m.id}...`);
+
+                const res = await fetch('/api/categories/rename', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    merchantId: m.id,
+                    categoryId: id,
+                    newName,
+                    oldName: originalName,
+                  }),
+                });
+
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success) throw new Error(data.error || 'Rename failed');
+
+                await load(); // re-render matrix
+              } catch (e) {
+                console.error(e);
+                showErrorOnce('Rename failed: ' + e.message);
+
+                input.disabled = false;
+                input.focus();
+                input.select();
+                return;
+              } finally {
+                stopLoading();
+                setStatus('');
+                saving = false;
+              }
+
+              exitEditNoSave();
+            }
+
+            editBtn.addEventListener('click', enterEdit);
+
+            input.addEventListener('keydown', (ev) => {
+              if (ev.key === 'Enter') {
+                ev.preventDefault();
+                justSubmittedByEnter = true;
+                saveIfChanged('enter').finally(() => {
+                  setTimeout(() => { justSubmittedByEnter = false; }, 250);
+                });
+              }
+              if (ev.key === 'Escape') {
+                ev.preventDefault();
+                cancelled = true;
+                exitEditNoSave();
+              }
+            });
+
+            input.addEventListener('blur', () => {
+              if (justSubmittedByEnter) return;
+              saveIfChanged('blur');
+            });
+
+            td.appendChild(wrap);
+          }
+
+          tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function load() {
+      try {
+        startLoading();
+        setStatus('Loading category matrix...');
+
+        const res = await fetch('/api/category-matrix', {
+          headers: { 'Accept': 'application/json' }
+        });
+        if (!res.ok) throw new Error(await res.text());
+
+        const data = await res.json();
+
+        merchants = data.merchants || [];
+        populateSyncMerchantSelect(merchants);
+        rows = data.rows || [];
+
+        ensureHeader(merchants);
+
+        setStatus(`Loaded ${rows.length} categories`);
+        render();
+      } catch (e) {
+        console.error(e);
+        tbody.innerHTML = `<tr><td colspan="99">Failed to load. Check server logs.</td></tr>`;
+        setStatus('');
+      } finally {
+        stopLoading();
+      }
+    }
+
+    // Sorting
+    const sortableThs = Array.from(document.querySelectorAll('#cat-table thead th.sortable'));
+    sortableThs.forEach(th => {
+      th.addEventListener('click', () => sortBy(th.dataset.key, th.dataset.type || 'string'));
+    });
+
+    // Search debounce
+    let t = null;
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(() => render(), 150);
+      });
+    }
+
+    if (filterMode) filterMode.addEventListener('change', () => render());
+    if (refreshBtn) refreshBtn.addEventListener('click', () => load().catch(console.error));
+
+    // Sync from Square (all merchants or one merchant)
+    if (syncBtn) {
+      syncBtn.addEventListener('click', async () => {
+        const merchantId = (syncMerchantSelect?.value || '').trim();
+
+        const ok = confirm(
+          merchantId
+            ? `Sync categories from Square for merchant ${merchantId}?`
+            : `Sync categories from Square for ALL merchants?`
+        );
+        if (!ok) return;
+
+        syncBtn.disabled = true;
+
+        try {
+          startLoading();
+          setStatus('Syncing from Square...');
+
+          const res = await fetch('/api/categories/sync-from-square', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ merchantId: merchantId || null }),
+          });
+
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.success) throw new Error(data.error || 'Sync failed');
+
+          setStatus('Sync complete. Refreshing...');
+          await load();
+          setStatus('Done ✅');
+          setTimeout(() => setStatus(''), 1200);
+        } catch (e) {
+          console.error(e);
+          alertOnce('Sync failed: ' + e.message);
+          setStatus('');
+        } finally {
+          stopLoading();
+          syncBtn.disabled = false;
+        }
+      });
+    }
+
+    // Initial load
+    load().catch(err => {
+      console.error(err);
+      stopLoading();
+      setStatus('');
+      tbody.innerHTML = `<tr><td colspan="99">Failed to load. Check server logs.</td></tr>`;
+    });
+  </script>
+</body>
+</html>

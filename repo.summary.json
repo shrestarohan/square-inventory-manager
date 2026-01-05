@@ -1,0 +1,548 @@
+{
+  "name": "square-inventory-sync",
+  "description": "",
+  "version": "1.0.0",
+  "node": "node:22-alpine",
+  "docker": {
+    "from": "node:22-alpine",
+    "workdir": "/app",
+    "cmd": null
+  },
+  "npmScripts": {
+    "start": "node server.js",
+    "dev": "NODE_OPTIONS=--max-old-space-size=8192 nodemon app.js",
+    "sync:gtin-meta": "node scripts/syncSheetToFirestore.js",
+    "proper:item-names": "node scripts/properCaseItemNames.js",
+    "sync:gtin-names:square": "node scripts/syncGtinNamesToSquare.js",
+    "sync:item-names-to-square": "node scripts/syncFirestoreItemNamesToSquare.js",
+    "cleanup:itemName-field": "node scripts/cleanupInventoryItemNameField.js",
+    "sync:inventory": "node scripts/syncInventory.js",
+    "sync:inventory-coverage": "node scripts/syncInventoryCoverage.js",
+    "sync:missing-items-to-square": "node scripts/syncMissingItemsToSquare.js",
+    "rebuild:master-inventory": "node scripts/rebuildMasterInventory.js",
+    "copy-images": "node scripts/copyImagesAcrossMerchants.js",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch",
+    "test:ci": "jest --ci --runInBand"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^7.0.0",
+    "algoliasearch": "^5.46.1",
+    "axios": "^1.13.2",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.2.3",
+    "ejs": "^3.1.9",
+    "express": "^4.19.0",
+    "express-session": "^1.18.2",
+    "form-data": "^4.0.5",
+    "googleapis": "^167.0.0",
+    "multer": "^2.0.2",
+    "openai": "^6.15.0",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "passport-local": "^1.0.0",
+    "sharp": "^0.34.5",
+    "square": "^43.2.1"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "jest": "^30.2.0",
+    "nodemon": "^3.1.11",
+    "supertest": "^7.1.4"
+  },
+  "topLevel": [
+    {
+      "name": "__tests__",
+      "type": "dir"
+    },
+    {
+      "name": ".dockerignore",
+      "type": "file"
+    },
+    {
+      "name": ".github",
+      "type": "dir"
+    },
+    {
+      "name": ".gitignore",
+      "type": "file"
+    },
+    {
+      "name": "app.js",
+      "type": "file"
+    },
+    {
+      "name": "auth",
+      "type": "dir"
+    },
+    {
+      "name": "bin",
+      "type": "dir"
+    },
+    {
+      "name": "Dockerfile",
+      "type": "file"
+    },
+    {
+      "name": "gpush.sh",
+      "type": "file"
+    },
+    {
+      "name": "jest.config.js",
+      "type": "file"
+    },
+    {
+      "name": "lib",
+      "type": "dir"
+    },
+    {
+      "name": "LICENSE",
+      "type": "file"
+    },
+    {
+      "name": "middleware",
+      "type": "dir"
+    },
+    {
+      "name": "package-lock.json",
+      "type": "file"
+    },
+    {
+      "name": "package.json",
+      "type": "file"
+    },
+    {
+      "name": "public",
+      "type": "dir"
+    },
+    {
+      "name": "README.md",
+      "type": "file"
+    },
+    {
+      "name": "routes",
+      "type": "dir"
+    },
+    {
+      "name": "scripts",
+      "type": "dir"
+    },
+    {
+      "name": "secrets",
+      "type": "dir"
+    },
+    {
+      "name": "server.js",
+      "type": "file"
+    },
+    {
+      "name": "services",
+      "type": "dir"
+    },
+    {
+      "name": "views",
+      "type": "dir"
+    }
+  ],
+  "binScripts": [
+    "deploy_square_inventory_sync.sh",
+    "generate_readme_ai.js",
+    "run_cloud_job.sh",
+    "scan_repo.js",
+    "sync_firestore_db.sh"
+  ],
+  "scripts": [
+    "aiAgent",
+    "backfillLocationIndexMerchantId.js",
+    "backfillSearchFields.js",
+    "buildGtinInventoryMatrix.js",
+    "buildGtinInventoryMatrixConsolidated.js",
+    "buildGtinMatrix.js",
+    "buildInventoryLocGtin.js",
+    "buildReplenishmentRecommendations.js",
+    "cleanupEmptyVariationForGtin.js",
+    "cleanupInventoryItemNameField.js",
+    "copyImagesAcrossMerchants.js",
+    "createUser.js",
+    "ensureGtinsPresentAcrossMerchants.js",
+    "fullNightlySync.js",
+    "migrateTaxonomy.js",
+    "normalizeGtinsAndRebuild.js",
+    "properCaseItemNames.js",
+    "pushTaxonomyToSquare.js",
+    "syncFirestoreItemNamesToSquare.js",
+    "syncGtinNamesToSquare.js",
+    "syncInventory.js",
+    "syncInventoryCoverage.js",
+    "syncMissingItemsToSquare.js",
+    "syncSalesDaily.js",
+    "syncSheetToFirestore.js",
+    "syncSquareCategoriesToFirestore.js",
+    "syncSquareSalesLinesToFirestore.js",
+    "testSquareToken.js",
+    "updateSpecsPrices.js"
+  ],
+  "routes": [
+    {
+      "file": "app.js",
+      "method": "GET",
+      "path": "/healthz"
+    },
+    {
+      "file": "app.js",
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "file": "app.js",
+      "method": "GET",
+      "path": "/debug/env"
+    },
+    {
+      "file": "routes/apiUpdates.js",
+      "method": "POST",
+      "path": "/api/update-price"
+    },
+    {
+      "file": "routes/apiUpdates.js",
+      "method": "POST",
+      "path": "/api/update-item-name"
+    },
+    {
+      "file": "routes/auth.js",
+      "method": "GET",
+      "path": "/login"
+    },
+    {
+      "file": "routes/auth.js",
+      "method": "POST",
+      "path": "/login"
+    },
+    {
+      "file": "routes/auth.js",
+      "method": "GET",
+      "path": "/auth/google"
+    },
+    {
+      "file": "routes/auth.js",
+      "method": "GET",
+      "path": "/auth/google/callback"
+    },
+    {
+      "file": "routes/auth.js",
+      "method": "POST",
+      "path": "/logout"
+    },
+    {
+      "file": "routes/categoriesList.js",
+      "method": "GET",
+      "path": "/api/categories"
+    },
+    {
+      "file": "routes/categoriesRename.js",
+      "method": "POST",
+      "path": "/api/categories/rename"
+    },
+    {
+      "file": "routes/categoryActions.js",
+      "method": "POST",
+      "path": "/api/categories/copy"
+    },
+    {
+      "file": "routes/categoryActions.js",
+      "method": "POST",
+      "path": "/api/categories/delete-all"
+    },
+    {
+      "file": "routes/categoryMatrix.js",
+      "method": "GET",
+      "path": "/api/category-matrix"
+    },
+    {
+      "file": "routes/categorySync.js",
+      "method": "POST",
+      "path": "/api/categories/sync-from-square"
+    },
+    {
+      "file": "routes/copyItemInfo.js",
+      "method": "POST",
+      "path": "/api/copy-item-info"
+    },
+    {
+      "file": "routes/deleteGtin.js",
+      "method": "POST",
+      "path": "/delete-item"
+    },
+    {
+      "file": "routes/gtinDuplicates.js",
+      "method": "GET",
+      "path": "/api/gtin-duplicates"
+    },
+    {
+      "file": "routes/gtinInventoryMatrix.js",
+      "method": "GET",
+      "path": "/api/duplicates-inventory-matrix"
+    },
+    {
+      "file": "routes/gtinInventoryMatrixConsolidated.js",
+      "method": "GET",
+      "path": "/api/gtin-inventory-matrix"
+    },
+    {
+      "file": "routes/gtinMatrix.js",
+      "method": "GET",
+      "path": "/api/gtin-matrix"
+    },
+    {
+      "file": "routes/gtinMeta.js",
+      "method": "GET",
+      "path": "/api/gtin-meta"
+    },
+    {
+      "file": "routes/gtinMeta.js",
+      "method": "PUT",
+      "path": "/api/gtin-meta/:gtin"
+    },
+    {
+      "file": "routes/indexPages.js",
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "file": "routes/indexPages.js",
+      "method": "GET",
+      "path": "/reorder"
+    },
+    {
+      "file": "routes/indexPages.js",
+      "method": "GET",
+      "path": "/dashboard"
+    },
+    {
+      "file": "routes/indexPages.js",
+      "method": "GET",
+      "path": "/dashboard/:merchantId"
+    },
+    {
+      "file": "routes/indexPages.js",
+      "method": "GET",
+      "path": "/dashboard-gtin"
+    },
+    {
+      "file": "routes/indexPages.js",
+      "method": "GET",
+      "path": "/duplicates-gtin"
+    },
+    {
+      "file": "routes/indexPages.js",
+      "method": "GET",
+      "path": "/dashboard-vendor-costs"
+    },
+    {
+      "file": "routes/indexPages.js",
+      "method": "GET",
+      "path": "/inventory-integrity"
+    },
+    {
+      "file": "routes/indexPages.js",
+      "method": "GET",
+      "path": "/reports"
+    },
+    {
+      "file": "routes/indexPages.js",
+      "method": "GET",
+      "path": "/categories"
+    },
+    {
+      "file": "routes/indexPages.js",
+      "method": "GET",
+      "path": "/category-matrix"
+    },
+    {
+      "file": "routes/inventory.js",
+      "method": "GET",
+      "path": "/api/inventory"
+    },
+    {
+      "file": "routes/inventoryIntegrityRoutes.js",
+      "method": "GET",
+      "path": "/inventory/negatives"
+    },
+    {
+      "file": "routes/inventoryIntegrityRoutes.js",
+      "method": "POST",
+      "path": "/inventory/fix"
+    },
+    {
+      "file": "routes/inventoryIntegrityRoutes.js",
+      "method": "GET",
+      "path": "/inventory/row"
+    },
+    {
+      "file": "routes/itemImages.js",
+      "method": "POST",
+      "path": "/api/update-item-image"
+    },
+    {
+      "file": "routes/itemsSetCategoryId.js",
+      "method": "POST",
+      "path": "/api/items/set-category-id"
+    },
+    {
+      "file": "routes/itemsUpdateFields.js",
+      "method": "POST",
+      "path": "/api/items/update-fields"
+    },
+    {
+      "file": "routes/reorderRoutes.js",
+      "method": "GET",
+      "path": "/api/reorder"
+    },
+    {
+      "file": "routes/replenishment.js",
+      "method": "GET",
+      "path": "/api/replenishment"
+    },
+    {
+      "file": "routes/replenishmentAiApi.js",
+      "method": "POST",
+      "path": "/api/replenishment-ai/plan"
+    },
+    {
+      "file": "routes/replenishmentAiApi.js",
+      "method": "POST",
+      "path": "/api/replenishment-ai/audit"
+    },
+    {
+      "file": "routes/replenishmentAiPage.js",
+      "method": "GET",
+      "path": "/replenishment-ai/:merchantId?"
+    },
+    {
+      "file": "routes/squareCategories.js",
+      "method": "GET",
+      "path": "/api/square-categories"
+    },
+    {
+      "file": "routes/squareOAuth.js",
+      "method": "GET",
+      "path": "/connect-square"
+    },
+    {
+      "file": "routes/squareOAuth.js",
+      "method": "GET",
+      "path": "/square/oauth/callback"
+    },
+    {
+      "file": "routes/tasks.js",
+      "method": "POST",
+      "path": "/tasks/sync-inventory"
+    },
+    {
+      "file": "routes/tasks.js",
+      "method": "GET",
+      "path": "/tasks/full-nightly-sync"
+    }
+  ],
+  "gcloudCmds": [
+    {
+      "file": "bin/deploy_square_inventory_sync.sh",
+      "commands": [
+        "gcloud builds submit --tag \"${IMAGE}\"",
+        "gcloud run deploy \"${SERVICE_NAME}\" \\",
+        "gcloud run services update-traffic \"${SERVICE_NAME}\" \\"
+      ]
+    },
+    {
+      "file": "bin/run_cloud_job.sh",
+      "commands": [
+        "  gcloud config set project \"$PROJECT_ID\" >/dev/null",
+        "  gcloud builds submit --tag \"$IMAGE\"",
+        "  gcloud config set project \"$PROJECT_ID\" >/dev/null",
+        "  gcloud run jobs update \"$JOB\" \\",
+        "  gcloud config set project \"$PROJECT_ID\" >/dev/null",
+        "  gcloud run jobs update \"$JOB\" \\",
+        "  gcloud run jobs execute \"$JOB\" --region \"$REGION\""
+      ]
+    },
+    {
+      "file": "bin/sync_firestore_db.sh",
+      "commands": [
+        "  gcloud config set project \"$PROJECT\" >/dev/null",
+        "  gcloud firestore databases list",
+        "gcloud config set project \"$PROJECT\" >/dev/null",
+        "gcloud firestore export \"$EXPORT_PATH\" --database=\"$SOURCE_DB\"",
+        "    gcloud firestore databases delete --database=\"$TARGET_DB\" --quiet",
+        "  gcloud firestore databases create --database=\"$TARGET_DB\" --location=\"$SRC_LOCATION\"",
+        "gcloud firestore import \"$EXPORT_PATH\" --database=\"$TARGET_DB\""
+      ]
+    }
+  ],
+  "notableFiles": [
+    "app.js",
+    "server.js",
+    "Dockerfile",
+    "README.md",
+    "lib/firestore.js",
+    "lib/loadEnv.js"
+  ],
+  "envVars": [
+    "ALLOWED_EMAILS",
+    "APP_ENV",
+    "BATCH_SIZE",
+    "CLEAN_DERIVED",
+    "CLEAN_ONLY",
+    "CONFIRM_DELETE",
+    "COST_SHEET_ID",
+    "COST_SHEET_RANGE",
+    "DRY_RUN",
+    "ENV_FILE",
+    "FIRESTORE_DATABASE_ID",
+    "FIX",
+    "GCLOUD_PROJECT",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GOOGLE_CALLBACK_URL",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GOOGLE_CLOUD_PROJECT",
+    "GTIN",
+    "GTINS",
+    "GTIN_SAMPLE_LIMIT",
+    "IDEA_COUNT",
+    "ITEM_LIMIT",
+    "ITEM_NAME_COLLECTION",
+    "JEST_WORKER_ID",
+    "K_SERVICE",
+    "LIMIT",
+    "LIMIT_GTINS",
+    "LIMIT_PER_MERCHANT",
+    "MERCHANT_ID",
+    "MERCHANT_IDS",
+    "MERCHANT_LABELS",
+    "NODE_ENV",
+    "NORMALIZE_INVENTORY",
+    "ONLY_UNSYNCED",
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL",
+    "PORT",
+    "READ_PAGE",
+    "REBUILD",
+    "SAMPLE_LIMIT",
+    "SESSION_SECRET",
+    "SLEEP_MS",
+    "SQUARE_ACCESS_TOKEN",
+    "SQUARE_APP_ID",
+    "SQUARE_APP_SECRET",
+    "SQUARE_ENV",
+    "SQUARE_LOCATION_IDS",
+    "SQUARE_REDIRECT_URI",
+    "SQUARE_REDIRECT_URI_DEV",
+    "SQUARE_REDIRECT_URI_PROD",
+    "TARGET_GTIN",
+    "TARGET_MERCHANT_ID",
+    "USE_FIRESTORE_CACHE",
+    "USE_SQUARE_API",
+    "WINDOW_DAYS",
+    "WRITE_BATCH"
+  ]
+}

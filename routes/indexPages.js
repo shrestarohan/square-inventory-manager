@@ -51,6 +51,7 @@ module.exports = function buildIndexPagesRouter({ firestore, requireLogin }) {
     }
   });
 
+  // All merchants (no merchantId)
   router.get('/dashboard-gtin', requireLogin, async (req, res) => {
     try {
       const merchantsSnap = await firestore.collection('merchants').get();
@@ -80,7 +81,7 @@ module.exports = function buildIndexPagesRouter({ firestore, requireLogin }) {
           data.store_name ||
           d.id;
 
-        return { id: d.id, display_name: displayName };
+        return { id: d.id, business_name: displayName };
       });
 
       res.render('duplicates_gtin', {
@@ -222,5 +223,32 @@ module.exports = function buildIndexPagesRouter({ firestore, requireLogin }) {
     }
   });
   
+  router.get("/categories", requireLogin, async (req, res) => {
+    const merchantsSnap = await firestore.collection("merchants").get();
+    const merchants = merchantsSnap.docs.map(d => ({
+      id: d.id,
+      ...d.data(),
+    }));
+
+    res.render("categories", {
+      pageTitle: "Category Manager",
+      currentView: "categories",
+      activePage: "categories",
+      merchants,
+    });
+  });
+
+  router.get("/category-matrix", requireLogin, async (req, res) => {
+    const mSnap = await firestore.collection("merchants").get();
+    const merchants = mSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    res.render("category-matrix", {
+      pageTitle: "Category Matrix",
+      currentView: "categories",
+      activePage: "category-matrix",
+      merchants,
+      showFilters: false,
+    });
+  });
+
   return router;
 };

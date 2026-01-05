@@ -15,6 +15,17 @@
         activePage: 'dashboard'
       }) %>
 
+  <div style="display:flex;gap:10px;align-items:center;margin:10px 0;">
+    <label style="display:flex;gap:8px;align-items:center;">
+      <input type="checkbox" id="onlyNoCategory" />
+      Only show items with no category
+    </label>
+
+    <button id="clearCategoryCacheBtn" type="button" class="btn btn-sm">
+      Clear category cache
+    </button>
+  </div>
+
   <table id="inventory-table">
     <thead>
       <tr>
@@ -29,8 +40,6 @@
         <th class="sortable" data-key="qty" data-type="number">Qty</th>
         <th class="sortable" data-key="state" data-type="string">State</th>
         <th class="sortable" data-key="price" data-type="number">Price</th>
-        <th class="sortable" data-key="currency" data-type="string">Currency</th>
-        <th class="sortable" data-key="tax_names" data-type="string">Sales Tax</th>
         <th class="sortable" data-key="calculated_at" data-type="string">Updated</th>
         <th>Actions</th>
       </tr>
@@ -59,7 +68,7 @@
     // ---------- header controls ----------
     const merchantSelect = document.getElementById('merchantSelect');
     if (merchantSelect) merchantSelect.addEventListener('change', () => {
-      const val = merchantSelect.value;
+      const val = "/dashboard/" + merchantSelect.value;
       if (val) window.location.href = val;
     });
 
@@ -76,12 +85,12 @@
     const loadStatus = document.getElementById('load-status');
 
     function setStatus(msg) {
-      if (loadStatus) loadStatus.textContent = (msg ?? ''); // no fallback text
+      if (loadStatus) loadStatus.textContent = (msg ?? '');
     }
 
     let loaderTimer = null;
     function startLoading(label) {
-      setStatus(label ?? ''); // keep empty by default
+      setStatus(label ?? '');
       if (topLoader) topLoader.classList.add('is-on');
       if (miniSpinner) miniSpinner.classList.add('is-on');
 
@@ -108,6 +117,370 @@
       }, 180);
     }
 
+    // ---------- Inline editing helpers ----------
+    function normStr(s) { return (s ?? '').toString().trim(); }
+
+    function parsePrice(val) {
+      const s = normStr(val).replace(/[^0-9.]/g, '');
+      if (!s) return null;
+      const n = Number(s);
+      if (!isFinite(n)) return null;
+      return Math.round(n * 100) / 100;
+    }
+
+    function validateField(field, value) {
+      if (field === 'gtin') {
+        const v = normStr(value).replace(/\s+/g, '');
+        // allow blank (clear)
+        if (!v) return { ok: true, value: '' };
+        // digits only, common GTIN lengths 8-14, but allow up to 20 if you want
+        if (!/^\d+$/.test(v)) return { ok: false, error: 'GTIN must be digits only.' };
+        if (v.length < 8 || v.length > 20) return { ok: false, error: 'GTIN length looks invalid.' };
+        return { ok: true, value: v };
+      }
+
+      if (field === 'sku') {
+        // allow anything but trim
+        return { ok: true, value: normStr(value) };
+      }
+
+      if (field === 'item_name') {
+        const v = normStr(value);
+        if (!v) return { ok: false, error: 'Item name cannot be empty.' };
+        return { ok: true, value: v };
+      }
+
+      if (field === 'price') {
+        const n = parsePrice(value);
+        if (n === null) return { ok: false, error: 'Price must be a number.' };
+        if (n < 0) return { ok: false, error: 'Price cannot be negative.' };
+        return { ok: true, value: n };
+      }
+
+      return { ok: false, error: 'Unknown field.' };
+    }
+
+    async function updateItemFields({ merchantId, itemId, variationId, updates }) {
+      const res = await fetch('/api/items/update-fields', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ merchantId, itemId, variationId, updates }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Update failed');
+      return data;
+    }
+
+    /**
+     * Makes a table cell inline-editable.
+     * - td: <td>
+     * - r: row object (your mapped row)
+     * - opts.field: 'item_name' | 'gtin' | 'sku' | 'price'
+     * - opts.get(): returns current display value
+     * - opts.set(value): mutates r with new value
+     */
+    function makeInlineEditable(td, r, opts) {
+      td.classList.add('is-clickable');
+      td.title = 'Click to edit';
+
+      // Prevent stacking multiple click listeners on re-render
+      td.addEventListener('click', () => openInlineEditor(td, r, opts), { once: true });
+    }
+
+    async function openInlineEditor(td, r, opts) {
+      if (td.dataset.editing === '1') return;
+      td.dataset.editing = '1';
+
+      const { field } = opts;
+      const originalDisplay = (opts.get ? opts.get() : '') ?? '';
+      const originalRaw = originalDisplay;
+
+      td.classList.add('is-editing');
+      td.innerHTML = '';
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'inline-input';
+      input.value = (field === 'price' && originalDisplay !== '' && originalDisplay != null)
+        ? String(originalDisplay)
+        : String(originalDisplay || '');
+      td.appendChild(input);
+
+      const close = (reRender = true) => {
+        td.dataset.editing = '0';
+        td.classList.remove('is-editing', 'is-saving');
+            if (reRender) {
+              // caller should re-render the entire row or just set textContent
+              // We'll just restore text now; your renderTable will rebuild anyway
+              td.textContent = (opts.get ? opts.get() : '') ?? '';
+              makeInlineEditable(td, r, opts); // re-arm click
+            }
+          };
+
+          const commit = async () => {
+            const nextRaw = input.value;
+
+            const v = validateField(field, nextRaw);
+            if (!v.ok) {
+              alert(v.error);
+              input.focus();
+              input.select();
+              return;
+            }
+
+            // no change
+            const nextVal = v.value;
+            const same =
+              (field === 'price')
+                ? Number(nextVal) === Number(parsePrice(originalRaw))
+                : String(nextVal) === String(originalRaw);
+
+            if (same) return close(true);
+
+            input.disabled = true;
+            td.classList.add('is-saving');
+
+            try {
+              startLoading('');
+
+              const updates = {};
+              updates[field] = nextVal;
+
+              // required IDs
+              if (!r.merchant_id || !r.item_id) throw new Error('Missing merchant_id / item_id in row');
+              const resp = await updateItemFields({
+                merchantId: r.merchant_id,
+                itemId: r.item_id,
+                variationId: r.variation_id || null,
+                updates,
+              });
+
+              // Apply returned values if server normalizes them
+              const applied = resp.updated || updates;
+
+              if (opts.set) opts.set(applied[field] ?? nextVal);
+
+              td.classList.add('is-saved');
+              setTimeout(() => td.classList.remove('is-saved'), 600);
+
+              close(true);
+            } catch (e) {
+              console.error(e);
+              alert(`Update failed: ${e.message}`);
+              // revert
+              if (opts.set) opts.set(originalDisplay);
+              close(true);
+            } finally {
+              stopLoading();
+            }
+          };
+
+          input.focus();
+          input.select();
+
+          input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commit(); }
+            if (e.key === 'Escape') { e.preventDefault(); close(true); }
+          });
+
+          input.addEventListener('blur', () => commit());
+        }
+      
+    // ---------- API helpers ----------
+    async function renameCategory({ merchantId, categoryId, newName }) {
+      const res = await fetch('/api/categories/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ merchantId, categoryId, newName }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Rename failed');
+      return data;
+    }
+
+    function clearCategoryCache(merchantId = null) {
+      if (merchantId) categoryCache.delete(merchantId);
+      else categoryCache.clear();
+    }
+
+    const clearCategoryCacheBtn = document.getElementById('clearCategoryCacheBtn');
+    if (clearCategoryCacheBtn) {
+      clearCategoryCacheBtn.addEventListener('click', () => {
+        clearCategoryCache();       // ✅ clears all merchants
+        // optional: also drop any open editor state if needed
+        alert('Category cache cleared. Next time you open a category dropdown it will re-fetch.');
+      });
+    }
+
+    // --- category dropdown cache (per merchant) ---
+    const categoryCache = new Map(); // merchantId -> [{categoryId,name},...]
+
+    async function fetchCategoriesForMerchant(merchantId) {
+      if (!merchantId) return [];
+      if (categoryCache.has(merchantId)) return categoryCache.get(merchantId);
+
+      const res = await fetch('/api/categories?merchantId=' + encodeURIComponent(merchantId), {
+        headers: { 'Accept': 'application/json' },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to load categories');
+
+      const cats = Array.isArray(data.categories) ? data.categories : [];
+      categoryCache.set(merchantId, cats);
+      return cats;
+    }
+
+    async function setItemCategoryId({ merchantId, itemId, categoryId, categoryName }) {
+      const res = await fetch('/api/items/set-category-id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ merchantId, itemId, categoryId, categoryName }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Set category failed');
+      return data;
+    }
+
+    // ---------- Category UI (button when missing; click-to-edit when present) ----------
+    function makeCategoryDisplayText(r) {
+      const t = (r.category_name || '').trim();
+      return t ? t : '';
+    }
+
+    function renderCategoryCell(td, r) {
+      td.innerHTML = '';
+      td.className = 'category-cell';
+
+      const canSet = !!(r.merchant_id && r.item_id);
+      const label = makeCategoryDisplayText(r);
+
+      if (!label) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-sm';
+        btn.textContent = 'Set category';
+        if (!canSet) btn.disabled = true;
+
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openCategoryEditor(td, r);
+        });
+
+        td.appendChild(btn);
+        return;
+      }
+
+      const span = document.createElement('span');
+      span.className = 'category-display';
+      span.textContent = label;
+      td.appendChild(span);
+
+      if (canSet) {
+        td.classList.add('is-clickable');
+        td.title = 'Click to change category';
+        td.addEventListener('click', () => openCategoryEditor(td, r), { once: true });
+      }
+    }
+
+    async function openCategoryEditor(td, r) {
+      if (td.dataset.editing === '1') return;
+      td.dataset.editing = '1';
+
+      const canSet = !!(r.merchant_id && r.item_id);
+      if (!canSet) { td.dataset.editing = '0'; return; }
+
+      const originalId = r.category_id || '';
+      const originalName = r.category_name || '';
+
+      td.classList.add('is-editing');
+      td.innerHTML = '';
+
+      const select = document.createElement('select');
+      select.className = 'inline-select';
+      select.disabled = true;
+
+      const opt0 = document.createElement('option');
+      opt0.value = '';
+      opt0.textContent = 'Select category...';
+      select.appendChild(opt0);
+
+      td.appendChild(select);
+
+      const close = () => {
+        td.dataset.editing = '0';
+        td.classList.remove('is-editing', 'is-saving');
+        renderCategoryCell(td, r);
+      };
+
+      try {
+        const cats = await fetchCategoriesForMerchant(r.merchant_id);
+
+        cats.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.categoryId;
+          opt.textContent = c.name;
+          select.appendChild(opt);
+        });
+
+        if (r.category_id) select.value = r.category_id;
+        else if (r.category_name) {
+          const match = cats.find(c => (c.name || '').toLowerCase() === (r.category_name || '').toLowerCase());
+          if (match) select.value = match.categoryId;
+        }
+
+        select.disabled = false;
+        select.focus();
+
+        select.addEventListener('change', async () => {
+          const nextId = select.value;
+          if (!nextId) return;
+
+          const nextName = select.options[select.selectedIndex]?.textContent || '';
+
+          select.disabled = true;
+          td.classList.add('is-saving');
+
+          try {
+            startLoading('');
+
+            const resp = await setItemCategoryId({
+              merchantId: r.merchant_id,
+              itemId: r.item_id,
+              categoryId: nextId,
+              categoryName: nextName,
+            });
+
+            r.category_id = resp.categoryId || nextId;
+            r.category_name = resp.categoryName || nextName;
+
+            td.classList.add('is-saved');
+            setTimeout(() => td.classList.remove('is-saved'), 600);
+
+            close();
+          } catch (e) {
+            console.error(e);
+            alert('Set category failed: ' + e.message);
+
+            r.category_id = originalId;
+            r.category_name = originalName;
+            close();
+          } finally {
+            stopLoading();
+          }
+        });
+
+        select.addEventListener('blur', () => close());
+        select.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') close();
+        });
+
+      } catch (e) {
+        console.error('Failed to load categories', e);
+        close();
+      }
+    }
+
     // ---------- Data & table state ----------
     const DASHBOARD_MERCHANT_ID = <%- JSON.stringify(merchantId || null) %>;
 
@@ -126,10 +499,64 @@
     const searchInput = document.getElementById('search');
     let currentQuery = '';
 
+    // ---------- search (from header.ejs) ----------
+    function debounce(fn, ms = 250) {
+      let t = null;
+      return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(() => fn(...args), ms);
+      };
+    }
+
+    function setQueryAndReload(nextQ) {
+      currentQuery = (nextQ || '').trim();
+      resetAndReload();
+    }
+
+    if (searchInput) {
+      // optional: load from URL (?q=...) if you want
+      const urlQ = new URLSearchParams(window.location.search).get('q');
+      if (urlQ && !currentQuery) {
+        currentQuery = urlQ;
+        searchInput.value = urlQ;
+      }
+
+      const onType = debounce(() => setQueryAndReload(searchInput.value), 300);
+
+      // live search while typing
+      searchInput.addEventListener('input', onType);
+
+      // Enter = immediate search
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          setQueryAndReload(searchInput.value);
+        }
+        // Escape clears
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          searchInput.value = '';
+          setQueryAndReload('');
+        }
+      });
+    } else {
+      console.warn("⚠️ header search input not found. Expected id='search' in header.ejs");
+    }
+    
+    // ✅ server-side filter state
+    const onlyNoCategoryToggle = document.getElementById('onlyNoCategory');
+    let onlyNoCategory = false;
+
+    if (onlyNoCategoryToggle) {
+      onlyNoCategoryToggle.addEventListener('change', () => {
+        onlyNoCategory = !!onlyNoCategoryToggle.checked;
+        resetAndReload();
+      });
+    }
+
     let currentRows = [];
     let currentSort = { key: null, direction: 'asc', type: 'string' };
 
-    // Abort old fetches if user clicks/types fast
     let inflight = null;
 
     function mapRow(r, idx) {
@@ -139,6 +566,7 @@
         merchant_name: r.merchant_name || r.merchant_id || '',
         location_name: r.location_name || r.location_id || '',
         category_name: r.category_name || '',
+        category_id: r.category_id || r.categoryId || '',
         item_name: r.item_name || '',
         variation_name: r.variation_name || '',
         sku: r.sku || '',
@@ -174,15 +602,17 @@
       if (DASHBOARD_MERCHANT_ID) params.set('merchantId', DASHBOARD_MERCHANT_ID);
       if (cursor) params.set('cursor', cursor);
 
-      // ✅ DB search
       if (currentQuery) params.set('q', currentQuery);
+
+      // ✅ server-side filter param
+      if (onlyNoCategory) params.set('onlyNoCategory', '1');
 
       const url = '/api/inventory?' + params.toString();
 
       if (inflight) inflight.abort();
       inflight = new AbortController();
 
-      startLoading(); // no text
+      startLoading('');
 
       try {
         const res = await fetch(url, {
@@ -195,7 +625,7 @@
           throw new Error('Failed to load inventory: ' + txt);
         }
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         const mapped = (data.rows || []).map(mapRow);
         const nextCursor = data.nextCursor || null;
 
@@ -204,7 +634,6 @@
 
         return mapped;
       } catch (e) {
-        // ignore aborted requests
         if (e && e.name === 'AbortError') return null;
         throw e;
       } finally {
@@ -222,9 +651,6 @@
 
       let pageRows = (pages[pageIndex]?.rows || []).slice();
 
-      // ✅ remove client-side search filter (DB does it)
-
-      // sort within page
       if (currentSort.key) {
         const { key, type, direction } = currentSort;
         const dir = direction === 'asc' ? 1 : -1;
@@ -270,7 +696,7 @@
                 : '')
             : '';
 
-        // Image cell (clickable to upload)
+        // Image
         const imgTd = document.createElement('td');
         imgTd.className = 'thumb-cell';
 
@@ -283,7 +709,6 @@
         img.alt = r.item_name || 'Item image';
 
         const hasImg = r.image_urls && r.image_urls.length;
-        //img.src = hasImg ? r.image_urls[0] : '/img/placeholder-thumb.png'; // or any placeholder you want
         const PLACEHOLDER_SVG = "data:image/svg+xml;utf8," + encodeURIComponent(`
         <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">
           <rect width="100%" height="100%" rx="10" ry="10" fill="#f2f2f2"/>
@@ -292,59 +717,52 @@
         `);
         img.src = hasImg ? r.image_urls[0] : PLACEHOLDER_SVG;
 
-        // hidden file input
         const fileInput = document.createElement('input');
         fileInput.type = 'file';
         fileInput.accept = 'image/*';
         fileInput.style.display = 'none';
 
-        // click image → open picker
         img.addEventListener('click', () => fileInput.click());
 
-        // when file selected → upload
         fileInput.addEventListener('change', async () => {
           const file = fileInput.files && fileInput.files[0];
           if (!file) return;
 
           try {
             startLoading('');
-
-            // optimistic UI: preview local image immediately
             const previewUrl = URL.createObjectURL(file);
             img.src = previewUrl;
 
             const fd = new FormData();
             fd.append('image', file);
-
-            // pick ONE identifier strategy:
-            // ✅ best: GTIN-based global update across merchants
             if (r.gtin) fd.append('gtin', r.gtin);
-
-            // optional extra context (helpful for debugging)
             if (r.merchant_id) fd.append('merchantId', r.merchant_id);
             if (r.item_id) fd.append('itemId', r.item_id);
 
-            const res = await fetch('/api/update-item-image', {
-              method: 'POST',
-              body: fd,
-            });
-
+            const res = await fetch('/api/update-item-image', { method: 'POST', body: fd });
             const data = await res.json().catch(() => ({}));
-            if (!res.ok || !data.success) throw new Error(data.error || 'Upload failed');
 
-            // server returns canonical URL(s)
-            if (data.imageUrl) img.src = data.imageUrl;
+            if (!res.ok || data.ok === false) {
+              // include useful server payload when available
+              const msg =
+                data?.error ||
+                (data?.results && Array.isArray(data.results)
+                  ? data.results.filter(r => r.ok === false).map(r => r.error).join(" | ")
+                  : null) ||
+                'Upload failed';
+              throw new Error(msg + (data ? `: ${JSON.stringify(data)}` : ''));
+            }
+
+            // ✅ success
+            if (data.firstImageUrl) img.src = data.firstImageUrl;
             img.classList.add('thumb-updated');
             setTimeout(() => img.classList.remove('thumb-updated'), 800);
           } catch (e) {
             console.error(e);
             alert('Image update failed: ' + e.message);
-
-            // revert UI if failed
-            img.src = hasImg ? r.image_urls[0] : '/img/placeholder-thumb.png';
+            img.src = hasImg ? r.image_urls[0] : PLACEHOLDER_SVG;
           } finally {
             stopLoading();
-            // reset input so selecting same file again triggers change
             fileInput.value = '';
           }
         });
@@ -354,35 +772,92 @@
         imgTd.appendChild(wrap);
         tr.appendChild(imgTd);
 
+        // Merchant
+        let td = document.createElement('td');
+        td.textContent = r.merchant_name;
+        tr.appendChild(td);
 
-        const cells = [
-          r.merchant_name,
-          r.location_name,
-          r.category_name,
-          r.item_name,
-          r.variation_name,
-          r.sku,
-          r.gtin,
-          (r.qty !== null && r.qty !== undefined) ? r.qty : '',
-          r.state,
-          (r.price !== null && r.price !== undefined) ? r.price.toFixed(2) : '',
-          r.currency,
-          taxText,
-          r.calculated_at,
-        ];
+        // Location
+        td = document.createElement('td');
+        td.textContent = r.location_name;
+        tr.appendChild(td);
 
-        cells.forEach(text => {
-          const td = document.createElement('td');
-          td.textContent = text;
-          tr.appendChild(td);
+        // Category
+        td = document.createElement('td');
+        renderCategoryCell(td, r);
+        tr.appendChild(td);
+
+        // Item
+        td = document.createElement('td');
+        td.textContent = r.item_name;
+        makeInlineEditable(td, r, {
+          field: 'item_name',
+          get: () => r.item_name || '',
+          set: (v) => { r.item_name = (v ?? '').toString(); }
         });
+        tr.appendChild(td);
 
-        // Actions cell
+        // Variation
+        td = document.createElement('td');
+        td.textContent = r.variation_name;
+        tr.appendChild(td);
+
+        // SKU
+        td = document.createElement('td');
+        td.textContent = r.sku || '';
+        makeInlineEditable(td, r, {
+          field: 'sku',
+          get: () => r.sku || '',
+          set: (v) => { r.sku = (v ?? '').toString(); }
+        });
+        tr.appendChild(td);
+
+        // GTIN
+        td = document.createElement('td');
+        td.textContent = r.gtin || '';
+        makeInlineEditable(td, r, {
+          field: 'gtin',
+          get: () => r.gtin || '',
+          set: (v) => { r.gtin = (v ?? '').toString(); }
+        });
+        tr.appendChild(td);
+
+        // Qty
+        td = document.createElement('td');
+        td.textContent = (r.qty !== null && r.qty !== undefined) ? Number(r.qty).toFixed(0) : '';
+        makeInlineEditable(td, r, {
+          field: 'qty',
+          get: () => (r.qty !== null && r.qty !== undefined) ? Number(r.qty).toFixed(0) : '',
+          set: (v) => { r.qty = (v === '' || v == null) ? null : Number(v); }
+        });
+        tr.appendChild(td);
+
+        // State
+        td = document.createElement('td');
+        td.textContent = r.state;
+        tr.appendChild(td);
+
+        // Price
+        td = document.createElement('td');
+        td.textContent = (r.price !== null && r.price !== undefined) ? Number(r.price).toFixed(2) : '';
+        makeInlineEditable(td, r, {
+          field: 'price',
+          get: () => (r.price !== null && r.price !== undefined) ? Number(r.price).toFixed(2) : '',
+          set: (v) => { r.price = (v === '' || v == null) ? null : Number(v); }
+        });
+        tr.appendChild(td);
+
+        // Updated
+        td = document.createElement('td');
+        td.textContent = r.calculated_at;
+        tr.appendChild(td);
+
+        // Actions
         const tdActions = document.createElement('td');
 
         const delBtn = document.createElement('button');
         delBtn.textContent = 'Delete';
-        delBtn.className = 'btn btn-sm btn-danger'; // or your own class
+        delBtn.className = 'btn btn-sm btn-danger';
         delBtn.addEventListener('click', async () => {
           const merchantId = r.merchant_id;
           const variationId = r.variation_id;
@@ -392,7 +867,7 @@
             alert('Missing GTIN for this row. Cannot delete reliably.');
             return;
           }
-          
+
           if (!merchantId || !variationId) {
             alert('Missing merchant/variation id for this row.');
             return;
@@ -405,23 +880,16 @@
 
           delBtn.disabled = true;
           try {
-            startLoading(''); // uses your top-loader + spinner
+            startLoading('');
             const res = await fetch('/api/delete-item', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                gtin: r.gtin || '',
-                merchantId,
-                variationId,
-                itemId,
-                mode: 'variation', // change to 'item' if you want delete entire item
-              }),
+              body: JSON.stringify({ gtin: r.gtin || '', merchantId, variationId, itemId, mode: 'variation' }),
             });
 
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
             if (!res.ok || !data.success) throw new Error(data.error || 'Delete failed');
 
-            // remove row instantly (or reload page)
             tr.remove();
           } catch (e) {
             console.error(e);
@@ -439,7 +907,7 @@
       });
 
       const hasNext = pages[currentPageIndex] && pages[currentPageIndex].nextCursor;
-      pageInfo.textContent = `Page ${currentPageIndex + 1} (rows: ${currentRows.length})`;
+      pageInfo.textContent = `Page ${currentPageIndex + 1} (rows: ${currentRows.length}${onlyNoCategory ? ', no-category only' : ''})`;
       prevBtn.disabled = currentPageIndex <= 0;
       nextBtn.disabled = !hasNext;
     }
@@ -463,28 +931,12 @@
     }
     headerCells.forEach(th => th.addEventListener('click', () => sortBy(th.dataset.key, th.dataset.type || 'string')));
 
-    // ✅ DB search (debounced)
-    let searchDebounce = null;
+    // reset
     function resetAndReload() {
       pages = [];
       cursors = [null];
       currentPageIndex = 0;
       loadPage(0);
-    }
-
-    if (searchInput) {
-      searchInput.addEventListener('input', () => {
-        clearTimeout(searchDebounce);
-        searchDebounce = setTimeout(() => {
-          // ✅ normalize so "375 ml" and "375ml" behave the same
-          currentQuery = (searchInput.value || '')
-            .trim()
-            .toLowerCase()
-            .replace(/\s+/g, '');
-
-          resetAndReload(); // this should reload page 0 and fetch with q=
-        }, 250);
-      });
     }
 
     // pagination
@@ -511,6 +963,5 @@
       }
     })();
   </script>
-
 </body>
 </html>

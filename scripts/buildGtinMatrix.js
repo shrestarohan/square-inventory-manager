@@ -70,7 +70,7 @@
 require("../lib/loadEnv"); // adjust relative path
 
 const firestore = require("../lib/firestore");
-const { createSquareClient } = require("../lib/square"); // createSquareClient(accessToken, env)
+const { createSquareClient } = require("../lib/square"); 
 const { canonicalGtin } = require("../lib/gtin");
 
 const DEFAULT_WRITE_BATCH = 400;

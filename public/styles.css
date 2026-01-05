@@ -365,6 +365,14 @@ tr.missing-row td{ background: rgba(255, 92, 92, .06); }
 /* ==========================================================
    Buttons
    ========================================================== */
+.btn.btn-sm {
+  padding: 3px 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn.btn-sm:hover { background: #f6f8fa; }
+
 .btn-danger{
   background:#ff4d4d;
   border:1px solid rgba(255,77,77,.35);
@@ -442,3 +450,36 @@ tr.missing-row td{ background: rgba(255, 92, 92, .06); }
   outline-offset: 2px;
   border-radius: 6px;
 }
+
+.inline-edit {
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.inline-edit:focus {
+  outline: none;
+  border-color: #cfd4dc;
+  background: #fff;
+}
+
+.category-cell.is-saving .inline-edit {
+  opacity: 0.6;
+}
+
+.category-cell.is-saved .inline-edit {
+  border-color: #7bd389;
+}
+
+.inline-input {
+  width: 80%;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font: inherit;
+}
+td.is-clickable { cursor: pointer; }
+td.is-editing { background: #fffbe6; }
+td.is-saving { opacity: 0.7; pointer-events: none; }
+td.is-saved { outline: 2px solid #b7eb8f; }

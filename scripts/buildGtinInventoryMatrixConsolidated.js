@@ -12,14 +12,14 @@
  *   gtin_inventory_matrix/{gtin}
  *     {
  *       gtin,
- *       gtin_raws,                // ✅ optional debug (sample of raw digit forms)
+ *       gtin_raws,                // optional debug (sample of raw digit forms)
  *       item_name,
  *       item_name_lc,
  *       category_name,
  *       sku,
  *       updated_at,
- *       has_mismatch,             // ✅ server-side filter
- *       price_spread,             // ✅ sorting / display
+ *       has_mismatch,             // server-side filter
+ *       price_spread,             // sorting / display
  *       min_price,
  *       max_price,
  *       priced_location_count,
@@ -42,11 +42,17 @@
  *     }
  *
  *   location_index/{id}
- *     { locKey }
+ *     {
+ *       locKey,
+ *       merchant_id,
+ *       merchant_name,
+ *       location_id,
+ *       location_name,
+ *       backfilled_at
+ *     }
  *
  * USAGE
  *   DRY_RUN=1 node scripts/buildGtinInventoryMatrixConsolidated.js
- *   node scripts/buildGtinInventoryMatrixConsolidated.js
  *
  *   # Limit to one merchant:
  *   TARGET_MERCHANT_ID=ML1... node scripts/buildGtinInventoryMatrixConsolidated.js
@@ -60,13 +66,16 @@
  *   READ_PAGE=1000
  *   WRITE_BATCH=400
  *
+ *   CLEAN_DERIVED=1            -> delete gtin_inventory_matrix + location_index before rebuild
+ *   CONFIRM_DELETE=YES         -> required when CLEAN_DERIVED=1 (unless DRY_RUN=1)
+ *   CLEAN_ONLY=1               -> delete then exit (no rebuild)
+ * 
  *   MERCHANT_LABELS='{"ML1...":"Plano","MLRE...":"GP1","MLTW...":"Fort Worth"}'
  * ============================================================
  */
 
 require("../lib/loadEnv"); // adjust relative path
 const firestore = require("../lib/firestore");
-
 const { canonicalGtin, normalizeDigits } = require("../lib/gtin");
 
 const DEFAULT_READ_PAGE = 1000;
@@ -76,14 +85,10 @@ function safeStr(v) {
   return v === null || v === undefined ? "" : String(v);
 }
 
-function makeSearchKey(s) {
-  return safeStr(s)
-    .toLowerCase()
-    .trim()
-    .replace(/[\s]+/g, "")          // remove spaces
-    .replace(/[^a-z0-9]/g, "");     // remove punctuation (optional but recommended)
-}
-
+/**
+ * Normalizes strings for cheap search keys.
+ * Example: "Tito's 750 ml" -> "titos750ml"
+ */
 function makeSearchKey(s) {
   return safeStr(s)
     .toLowerCase()
@@ -92,12 +97,66 @@ function makeSearchKey(s) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+async function deleteCollectionByQuery(colRef, pageSize = 450) {
+  let totalDeleted = 0;
+
+  while (true) {
+    const snap = await colRef.orderBy("__name__").limit(pageSize).get();
+    if (snap.empty) break;
+
+    const batch = firestore.batch();
+    for (const doc of snap.docs) batch.delete(doc.ref);
+
+    await batch.commit();
+    totalDeleted += snap.size;
+
+    // small progress log
+    if (totalDeleted % (pageSize * 5) === 0) {
+      console.log(`   ...deleted ${totalDeleted} so far from ${colRef.path}`);
+    }
+  }
+
+  return totalDeleted;
+}
+
+async function cleanDerivedCollections({ dryRun, readPageSize }) {
+  const confirm = String(process.env.CONFIRM_DELETE || "").trim().toUpperCase();
+  const cleanOnly = !!process.env.CLEAN_ONLY;
+
+  if (dryRun) {
+    console.log("🧽 CLEAN_DERIVED requested but DRY_RUN=1, so no deletions will occur.");
+    return { cleanOnly, deletedGtin: 0, deletedLoc: 0 };
+  }
+
+  if (confirm !== "YES") {
+    throw new Error(
+      "Refusing to delete collections: set CONFIRM_DELETE=YES (exact) when CLEAN_DERIVED=1"
+    );
+  }
+
+  console.log("\n🧽 Cleaning derived collections BEFORE rebuild...");
+  console.log("   Deleting: gtin_inventory_matrix");
+  const deletedGtin = await deleteCollectionByQuery(
+    firestore.collection("gtin_inventory_matrix"),
+    Math.min(readPageSize, 450)
+  );
+
+  console.log("   Deleting: location_index");
+  const deletedLoc = await deleteCollectionByQuery(
+    firestore.collection("location_index"),
+    Math.min(readPageSize, 450)
+  );
+
+  console.log(`✅ Clean complete. Deleted gtin_inventory_matrix=${deletedGtin}, location_index=${deletedLoc}`);
+  return { cleanOnly, deletedGtin, deletedLoc };
+}
+
 /**
  * Builds a compact token set for fast array-contains search.
  * Captures:
  *  - words (vodka, titos)
  *  - merged size tokens (200ml, 750ml, 12pk, 1l, 0.5l)
- *  - numeric tokens (200, 750) (optional but helpful)
+ *  - sku tokens
  */
 function makeSearchTokens(itemName, sku) {
   const tokens = new Set();
@@ -105,7 +164,6 @@ function makeSearchTokens(itemName, sku) {
   const add = (t) => {
     const k = makeSearchKey(t);
     if (!k) return;
-    // Keep tokens reasonable (avoid huge arrays)
     if (k.length > 2 && k.length <= 24) tokens.add(k);
   };
 
@@ -132,11 +190,9 @@ function makeSearchTokens(itemName, sku) {
   if (skuStr) {
     const skuParts = skuStr.replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/g).filter(Boolean);
     for (const p of skuParts) add(p);
-    // also add fused sku key
     add(skuStr);
   }
 
-  // cap array size (Firestore doc size safety + index costs)
   return Array.from(tokens).slice(0, 40);
 }
 
@@ -150,19 +206,35 @@ function parseArgs(argv) {
   return out;
 }
 
+/**
+ * Firestore-safe doc id from arbitrary text. (Keeps your existing approach.)
+ */
 function locIdForKey(locKey) {
   return Buffer.from(locKey, "utf8").toString("base64").replace(/=+$/g, "");
 }
 
 /**
- * locKey should be stable and match the UI columns you want.
- * If you want EXACT store names, set MERCHANT_LABELS in env:
- *   MERCHANT_LABELS='{"ML1...":"Plano","MLRE...":"GP1","MLTW...":"Fort Worth"}'
+ * ✅ locKey format (UPDATED):
+ *   locKey: "<Square Merchant Name> – <Square Location Name>"
+ *
+ * Examples:
+ *   "Patan Incorporated – Patan Incorporated (Main)"
+ *   "Once Upon A Bottle Liquor – Plano #2"
+ *
+ * Notes:
+ * - Merchant name prefers Square merchant label/map if you provide one,
+ *   otherwise falls back to d.merchant_name, then merchantId.
+ * - Location name prefers d.location_name, then falls back to location_id, then "Unknown Location".
+ */
+/**
+ * ✅ locKey format (MERCHANT-ONLY):
+ *   locKey: "<merchantName> – <merchantName>"
+ *
+ * One column per merchant regardless of Square location count.
  */
 function makeLocKey(d, merchantId, merchantLabelMap) {
-  const label = merchantLabelMap?.[merchantId] || safeStr(d.merchant_name || merchantId).trim();
-  const locName = safeStr(d.location_name || d.location_id || "Default").trim();
-  return `${label} – ${locName}`.trim();
+  // Stable key: one per merchant, forever
+  return `${merchantId} – ${merchantId}`;
 }
 
 // Prefer: has price > no price, then latest calculated_at/updated_at
@@ -181,7 +253,17 @@ function shouldReplace(existing, candidate) {
   return cTime >= eTime;
 }
 
-// ✅ Metrics used for server-side mismatch filter
+function getMerchantLabel(d, merchantId, merchantLabelMap) {
+  const fromMap = safeStr(merchantLabelMap?.[merchantId]).trim();
+  if (fromMap) return fromMap.replace(/\s+/g, " ");
+
+  const fromDoc = safeStr(d?.merchant_name).trim();
+  if (fromDoc && fromDoc !== merchantId) return fromDoc.replace(/\s+/g, " ");
+
+  return safeStr(merchantId).trim();
+}
+
+// Metrics used for server-side mismatch filter
 function computeMismatchMetrics(pricesByLocation) {
   const priced = Object.values(pricesByLocation || {})
     .map((x) => (x && x.price !== null && x.price !== undefined ? Number(x.price) : null))
@@ -215,6 +297,29 @@ async function listMerchantIds() {
   return snap.docs.map((d) => d.id);
 }
 
+async function loadMerchantLabelMapFromDb(merchantIds) {
+  const map = {};
+
+  // Read merchant docs in parallel
+  const snaps = await Promise.all(
+    merchantIds.map((id) => firestore.collection("merchants").doc(id).get())
+  );
+
+  for (const doc of snaps) {
+    if (!doc.exists) continue;
+    const data = doc.data() || {};
+
+    // ✅ pick whichever field you actually store
+    const label =
+      safeStr(data.label || data.name || data.merchant_name || data.display_name).trim();
+
+    if (label) map[doc.id] = label.replace(/\s+/g, " ");
+  }
+
+  return map;
+}
+
+
 async function run() {
   const args = parseArgs(process.argv);
 
@@ -230,16 +335,32 @@ async function run() {
   );
 
   const limitGtins = Number(args.limitGtins || process.env.LIMIT_GTINS) || null;
+  const cleanDerived = !!(args.cleanDerived || process.env.CLEAN_DERIVED);
 
   const merchantIdArg = args.merchantId || process.env.TARGET_MERCHANT_ID || null;
   const merchantIds = merchantIdArg ? [merchantIdArg] : await listMerchantIds();
 
-  let merchantLabelMap = {};
+  // 1) Start with DB labels (best / stable)
+  let merchantLabelMap = await loadMerchantLabelMapFromDb(merchantIds);
+
+  // 2) Optional: ENV overrides DB (if provided)
   try {
-    if (process.env.MERCHANT_LABELS) merchantLabelMap = JSON.parse(process.env.MERCHANT_LABELS);
+    if (process.env.MERCHANT_LABELS) {
+      const envMap = JSON.parse(process.env.MERCHANT_LABELS);
+      merchantLabelMap = { ...merchantLabelMap, ...envMap };
+    }
   } catch (_) {
     console.warn("⚠️ MERCHANT_LABELS is not valid JSON; ignoring.");
   }
+
+  console.log("🏷️ Merchant labels resolved:", merchantLabelMap);
+
+  const missingLabels = merchantIds.filter((id) => !safeStr(merchantLabelMap?.[id]).trim());
+  if (missingLabels.length) {
+    console.warn("⚠️ Missing MERCHANT_LABELS for:", missingLabels.join(", "));
+    console.warn("   Set MERCHANT_LABELS env var so location_index can show names.");
+  }
+
 
   console.log(`\n🔧 buildGtinInventoryMatrixConsolidated`);
   console.log(
@@ -250,7 +371,17 @@ async function run() {
   const outCol = firestore.collection("gtin_inventory_matrix");
   const locIndexCol = firestore.collection("location_index");
 
-  const locationKeys = new Set();
+  if (cleanDerived) {
+    const { cleanOnly } = await cleanDerivedCollections({ dryRun, readPageSize });
+    if (cleanOnly) {
+      console.log("🧼 CLEAN_ONLY=1 set. Exiting after cleanup.");
+      return;
+    }
+  }
+
+  // ✅ Store a richer location index so merchant_id is always present without any backfill script
+  // Map<locKey, { locKey, merchant_id, merchant_name, location_id, location_name }>
+  const locationIndex = new Map();
 
   let totalScanned = 0;
   let totalWrote = 0;
@@ -282,7 +413,7 @@ async function run() {
       const snap = await q.get();
       if (snap.empty) break;
 
-      // ✅ Aggregate per CANONICAL GTIN per page (lets us compute mismatch metrics)
+      // Aggregate per CANONICAL GTIN per page
       // Map<gtinKey, { gtin, gtin_raws, header, pricesByLocation }>
       const pageByGtin = new Map();
 
@@ -290,11 +421,11 @@ async function run() {
         totalScanned++;
         const d = doc.data() || {};
 
-        // ✅ canonicalize GTIN
+        // canonicalize GTIN
         const gtinKey = canonicalGtin(d.gtin);
         if (!gtinKey) continue;
 
-        // raw digits for debugging (shows why duplicates used to happen)
+        // raw digits for debugging
         const gtinRawDigits = normalizeDigits(d.gtin);
 
         if (limitGtins) {
@@ -305,9 +436,34 @@ async function run() {
           }
         }
 
+        // ✅ Required locKey shape: "<MerchantLabel> – <MerchantLabel>"
         const locKey = makeLocKey(d, merchantId, merchantLabelMap);
         if (!locKey || locKey === "–") continue;
-        locationKeys.add(locKey);
+
+        // ✅ Upsert rich location index entry (no separate backfill needed)
+        if (!locationIndex.has(locKey)) {
+          const label = getMerchantLabel(d, merchantId, merchantLabelMap);
+
+          if (!label) {
+            console.warn(`⚠️ No label found for merchantId=${merchantId}. Using merchantId as display label. Fix MERCHANT_LABELS.`);
+          }
+
+          locationIndex.set(locKey, {
+            locKey,
+            merchant_id: merchantId,
+            merchant_name: label || merchantId,
+            location_id: null,
+            location_name: label || merchantId,
+          });
+        } else {
+          const cur = locationIndex.get(locKey);
+          const label = getMerchantLabel(d, merchantId, merchantLabelMap);
+
+          if (label) {
+            if (!cur.merchant_name || cur.merchant_name === merchantId) cur.merchant_name = label;
+            if (!cur.location_name || cur.location_name === merchantId) cur.location_name = label;
+          }
+        }
 
         const price = d.price !== undefined && d.price !== null ? Number(d.price) : null;
 
@@ -316,7 +472,7 @@ async function run() {
           currency: d.currency || null,
 
           merchant_id: d.merchant_id || merchantId || null,
-          merchant_name: d.merchant_name || null,
+          merchant_name: getMerchantLabel(d, merchantId, merchantLabelMap) || null,
 
           location_id: d.location_id || null,
           location_name: d.location_name || null,
@@ -331,15 +487,14 @@ async function run() {
           updated_at: d.updated_at || null,
         };
 
-        // init / fetch aggregator (by canonical GTIN)
+        // init / fetch aggregator
         let agg = pageByGtin.get(gtinKey);
         if (!agg) {
           agg = {
             gtin: gtinKey,
-            // keep a small sample of raw variants seen (avoid huge arrays)
             gtin_raws: [],
             header: { item_name: "", category_name: "", sku: "" },
-            pricesByLocation: {}, // locKey -> locInfo
+            pricesByLocation: {},
           };
           pageByGtin.set(gtinKey, agg);
         }
@@ -365,7 +520,7 @@ async function run() {
       const nowIso = new Date().toISOString();
 
       for (const agg of pageByGtin.values()) {
-        const gtinDoc = outCol.doc(agg.gtin); // ✅ doc id uses CANONICAL GTIN
+        const gtinDoc = outCol.doc(agg.gtin);
 
         const itemName = agg.header.item_name || null;
         const sku = agg.header.sku || null;
@@ -387,8 +542,6 @@ async function run() {
           updated_at: nowIso,
         };
 
-
-        // ✅ Add mismatch metrics for fast server-side filtering
         Object.assign(payload, computeMismatchMetrics(payload.pricesByLocation));
 
         batch.set(gtinDoc, payload, { merge: true });
@@ -412,15 +565,31 @@ async function run() {
   // Final commit
   await commit(true);
 
-  // Write global location_index
-  console.log(`\n🧭 Writing location_index (${locationKeys.size} keys)`);
+  // ✅ Write global location_index with merchant_id baked in (no backfill script needed)
+  console.log(`\n🧭 Writing location_index (${locationIndex.size} keys)`);
   if (!dryRun) {
-    const locArr = Array.from(locationKeys).sort();
+    const rows = Array.from(locationIndex.values()).sort((a, b) => a.locKey.localeCompare(b.locKey));
     let locBatch = firestore.batch();
     let locWrites = 0;
 
-    for (const locKey of locArr) {
-      locBatch.set(locIndexCol.doc(locIdForKey(locKey)), { locKey }, { merge: true });
+    const nowIso2 = new Date().toISOString();
+
+    for (const r of rows) {
+      const docId = locIdForKey(r.locKey);
+
+      locBatch.set(
+        locIndexCol.doc(docId),
+        {
+          locKey: r.locKey,
+          merchant_id: r.merchant_id || null,
+          merchant_name: r.merchant_name || null,
+          location_id: r.location_id || null,
+          location_name: r.location_name || null,
+          backfilled_at: nowIso2,
+        },
+        { merge: true }
+      );
+
       locWrites++;
       if (locWrites >= 450) {
         await locBatch.commit();
@@ -435,14 +604,19 @@ async function run() {
   console.log(`   total scanned docs: ${totalScanned}`);
   console.log(`   total wrote entries: ${totalWrote}`);
   console.log(`   canonical gtins seen: ${uniqueCanonicalGtinsSeen.size}`);
-  console.log(`   locKeys: ${locationKeys.size}`);
+  console.log(`   locKeys: ${locationIndex.size}`);
+}
+
+// keep your existing run() as-is
+async function buildGtinInventoryMatrixConsolidated() {
+  return run();
 }
 
 if (require.main === module) {
-  run().catch((e) => {
+  buildGtinInventoryMatrixConsolidated().catch((e) => {
     console.error("Fatal:", e);
     process.exit(1);
   });
 }
 
-module.exports = { run };
+module.exports = { buildGtinInventoryMatrixConsolidated };

@@ -2,8 +2,9 @@
      Price mismatch dashboard (global consolidated view, no merchant dropdown).
      Uses:
        GET /api/gtin-inventory-matrix  -> { rows, locations, nextCursor }
-     Server-side filter:
+     Server-side filters:
        mismatchOnly=1
+       missingOnly=1&missingTarget=<locKey>&missingRequirePresentIn=<locKey>
 -->
 <!DOCTYPE html>
 <html>
@@ -26,7 +27,10 @@
     Rows highlighted have different prices across locations.
   </p>
 
-  <!-- ✅ Server-side filter UI, don't add here it's added to header.ejs -->
+  <!-- ✅ Server-side filter UI: mismatch + missing filters live in header.ejs -->
+  <!-- Required IDs in header.ejs:
+       - select#mismatchFilter  (values: "all" | "mismatch")
+  -->
 
   <table id="inventory-table">
     <thead>
@@ -60,6 +64,13 @@
   <%- include('partials/footer') %>
 
   <script>
+    // ---------- header controls ----------
+    const merchantSelect = document.getElementById('merchantSelect');
+    if (merchantSelect) merchantSelect.addEventListener('change', () => {
+      const val = "/dashboard-gtin/" + merchantSelect.value;
+      if (val) window.location.href = val;
+    });
+
     // header view switch
     const viewSelect = document.getElementById('viewSelect');
     if (viewSelect) viewSelect.addEventListener('change', () => {
@@ -107,12 +118,29 @@
     const nextBtn = document.getElementById('nextPage');
     const searchInput = document.getElementById('search'); // from header partial, optional
 
-    // ✅ server-side mismatch filter
+    // ✅ server-side mismatch filter (header.ejs)
     const mismatchFilterSelect = document.getElementById('mismatchFilter');
     let mismatchOnly = false;
 
+    // ✅ server-side missing filter (header.ejs)
+    const missingFilterSelect = document.getElementById('missingFilter');          // all | missing
+    const missingTargetSelect = document.getElementById('missingTarget');          // locKey
+    const missingBaseSelect   = document.getElementById('missingRequireBase');     // optional locKey
+
+    let missingOnly = false;
+    let missingTarget = '';
+    let missingRequireBase = '';
+
     let locationKeys = [];
+    let locationsMeta = {}; // locKey -> { label, merchant_id, ... }
     let headerBuilt = false;
+
+    function locLabel(locKey) {
+      return (locationsMeta && locationsMeta[locKey] && locationsMeta[locKey].label)
+        ? locationsMeta[locKey].label
+        : locKey;
+    }
+
 
     let pages = [];        // [{ rows, nextCursor }]
     let cursors = [null];  // cursor for each page
@@ -141,6 +169,26 @@
       });
     }
 
+    // ✅ Bind missing filters (added in header.ejs)
+    if (missingFilterSelect) {
+      missingFilterSelect.addEventListener('change', () => {
+        missingOnly = missingFilterSelect.value === 'missing';
+        resetPagingAndLoad();
+      });
+    }
+    if (missingTargetSelect) {
+      missingTargetSelect.addEventListener('change', () => {
+        missingTarget = (missingTargetSelect.value || '').trim();
+        if (missingOnly) resetPagingAndLoad();
+      });
+    }
+    if (missingBaseSelect) {
+      missingBaseSelect.addEventListener('change', () => {
+        missingRequireBase = (missingBaseSelect.value || '').trim();
+        if (missingOnly) resetPagingAndLoad();
+      });
+    }
+
     function renderSkeleton() {
       tbody.innerHTML = '';
       for (let i = 0; i < 10; i++) {
@@ -157,11 +205,36 @@
       locationKeys = Array.isArray(locKeys) ? locKeys : [];
       locationKeys.forEach(locKey => {
         const th = document.createElement('th');
-        th.textContent = locKey + ' (Price)';
+        th.textContent = locLabel(locKey) + ' (Price)';
         headerRow.appendChild(th);
       });
       headerBuilt = true;
     }
+
+    function ensureMissingTargets(locKeys) {
+      const keys = Array.isArray(locKeys) ? locKeys : [];
+
+      if (missingTargetSelect && missingTargetSelect.dataset.built !== '1') {
+        keys.forEach(k => {
+          const opt = document.createElement('option');
+          opt.value = k;                 // ✅ keep locKey as value
+          opt.textContent = locLabel(k); // ✅ show business name
+          missingTargetSelect.appendChild(opt);
+        });
+        missingTargetSelect.dataset.built = '1';
+      }
+
+      if (missingBaseSelect && missingBaseSelect.dataset.built !== '1') {
+        keys.forEach(k => {
+          const opt = document.createElement('option');
+          opt.value = k;
+          opt.textContent = locLabel(k);
+          missingBaseSelect.appendChild(opt);
+        });
+        missingBaseSelect.dataset.built = '1';
+      }
+    }
+
 
     function getHeaderCells() {
       return Array.from(document.querySelectorAll('#inventory-table thead th.sortable'));
@@ -202,6 +275,13 @@
       // ✅ server-side mismatch filter param
       if (mismatchOnly) params.set('mismatchOnly', '1');
 
+      // ✅ server-side missing filter params
+      if (missingOnly) {
+        params.set('missingOnly', '1');
+        if (missingTarget) params.set('missingTarget', missingTarget);
+        if (missingRequireBase) params.set('missingRequirePresentIn', missingRequireBase);
+      }
+
       const url = '/api/gtin-inventory-matrix?' + params.toString();
 
       if (inflight) inflight.abort();
@@ -216,8 +296,10 @@
 
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-
+      
+      if (data.locationsMeta) locationsMeta = data.locationsMeta || {};
       if (!headerBuilt && data.locations) ensureHeader(data.locations);
+      if (data.locations) ensureMissingTargets(data.locations);
 
       const rows = (data.rows || []).map(r => ({
         gtin: r.gtin || '',
@@ -261,8 +343,6 @@
       btn.disabled = true;
 
       try {
-        // ✅ Use the SAME endpoint your dashboard uses.
-        // If your dashboard endpoint is different, change this URL to match it.
         const res = await fetch('/api/delete-item', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -272,7 +352,6 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success) throw new Error(data.error || 'Delete failed');
 
-        // ✅ Remove the deleted row from cached pages so it disappears immediately
         for (const p of pages) {
           if (!p || !p.rows) continue;
           p.rows = p.rows.filter(row => row.gtin !== gtin);
@@ -280,10 +359,6 @@
         currentRows = currentRows.filter(row => row.gtin !== gtin);
 
         renderTable();
-
-        // Optional: if you prefer a full refresh (slower but simplest)
-        // resetPagingAndLoad();
-
       } catch (err) {
         console.error(err);
         alert('Failed to delete: ' + err.message);
@@ -291,7 +366,6 @@
         btn.disabled = false;
       }
     }
-
 
     // Used only for row highlighting
     function isMismatchRow(r) {
@@ -304,6 +378,112 @@
       const first = prices[0];
       return prices.some(p => Math.abs(p - first) > 0.0001);
     }
+
+    // ✅ Copy item info from one store/location to another
+    // Shows a "Copy" button only when a location cell is missing.
+    async function handleCopyItemInfo(event) {
+      const btn = event.target;
+      const gtin = (btn.dataset.gtin || '').trim();
+      const toLocKey = (btn.dataset.toLocKey || '').trim();
+      const fromLocKey = (btn.dataset.fromLocKey || '').trim();
+
+      if (!gtin) return alert('Missing GTIN.');
+      if (!toLocKey) return alert('Missing destination store/location.');
+      if (!fromLocKey) return alert('No source store/location found to copy from.');
+
+      /*const ok = confirm(
+        `Copy item info?\n\nGTIN: ${gtin}\nFrom: ${fromLocKey}\nTo: ${toLocKey}\n\nThis will copy basic metadata into the destination store (and create a placeholder if missing).`
+      );
+      if (!ok) return;*/
+
+      const td = btn.closest('td');
+      btn.disabled = true;
+      const oldText = btn.textContent;
+      btn.textContent = 'Copying…';
+
+      try {
+        const res = await fetch('/api/copy-item-info', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            gtin,
+            fromLocKey,
+            toLocKey,
+            fields: ['item_name', 'category_name', 'sku'],
+            createIfMissing: true,
+          }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || 'Copy failed');
+
+        // ✅ add this block RIGHT HERE
+        const mid = (data.toMerchantId || '').trim();
+        const vid = (data.toVariationId || '').trim();
+
+        if (!mid || !vid) {
+          // backend didn't return ids yet => keep cell informative, don't show disabled red input
+          if (td) {
+            td.innerHTML = `<div style="font-size:12px;opacity:.85;">Created. Waiting for IDs…</div>`;
+          }
+          btn.disabled = false;
+          btn.textContent = oldText;
+          return;
+        }
+
+        // ✅ Update local cache for this row so future renders show the input
+        const row = currentRows.find(r => (r.gtin || '') === gtin);
+        if (row) {
+          row.pricesByLocation = row.pricesByLocation || {};
+          row.pricesByLocation[toLocKey] = {
+            ...(row.pricesByLocation[toLocKey] || {}),
+            merchant_id: data.toMerchantId || '',
+            location_id: data.toLocationId || '',
+            variation_id: data.toVariationId || '',
+            item_id: data.toItemId || '',
+            currency: data.currency || 'USD',
+            price: (typeof data.toPrice === 'number' && Number.isFinite(data.toPrice)) ? data.toPrice : null,
+            calculated_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+        }
+
+        // ✅ Swap only this cell to inline price input
+        if (td) {
+          
+          td.innerHTML = '';
+
+          const input = document.createElement('input');
+          input.type = 'number';
+          input.step = '0.01';
+          input.className = 'price-input';
+
+          if (typeof data.toPrice === 'number' && Number.isFinite(data.toPrice)) {
+            input.value = Number(data.toPrice).toFixed(2);
+          } else {
+            input.value = ''; // let user enter
+          }
+
+          input.dataset.merchantId = data.toMerchantId || '';
+          input.dataset.variationId = data.toVariationId || '';
+          input.dataset.currency = data.currency || 'USD';
+
+          input.addEventListener('change', handlePriceChange);
+          td.appendChild(input);
+
+          // focus so user can edit immediately
+          input.focus();
+          input.select();
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Copy failed: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = oldText;
+      }
+    }
+
+
 
     function renderTable() {
       tbody.innerHTML = '';
@@ -334,7 +514,11 @@
 
       if (!currentRows.length) {
         tbody.innerHTML = `<tr><td colspan="${5 + locationKeys.length}">No GTIN rows found.</td></tr>`;
-        pageInfo.textContent = `Page ${currentPageIndex + 1} (${mismatchOnly ? 'Mismatch only' : 'All'} — 0 rows)`;
+        const filtersLabel = [
+          mismatchOnly ? 'Mismatch only' : 'All',
+          missingOnly ? `Missing in ${missingTarget ? locLabel(missingTarget) : '(select store)'}` : null
+        ].filter(Boolean).join(' — ');
+        pageInfo.textContent = `Page ${currentPageIndex + 1} (${filtersLabel || 'All'} — 0 rows)`;
         prevBtn.disabled = currentPageIndex <= 0;
         nextBtn.disabled = !(pages[currentPageIndex] && pages[currentPageIndex].nextCursor);
         return;
@@ -344,7 +528,7 @@
         const tr = document.createElement('tr');
         if (isMismatchRow(r)) tr.classList.add('mismatch-row');
 
-        // --- delete button (last column) ---
+        // --- delete button ---
         const tdDel = document.createElement('td');
         const delBtn = document.createElement('button');
         delBtn.textContent = 'Delete';
@@ -362,7 +546,7 @@
         const tdSku = document.createElement('td');
         tdSku.textContent = r.sku || '';
         tr.appendChild(tdSku);
-        
+
         const tdCat = document.createElement('td');
         tdCat.textContent = r.category_name || '';
         tr.appendChild(tdCat);
@@ -388,25 +572,55 @@
             input.className = 'price-input';
             if (info.price != null) input.value = Number(info.price).toFixed(2);
 
-            input.dataset.merchantId = info.merchant_id || '';
-            input.dataset.variationId = info.variation_id || '';
-            input.dataset.currency = info.currency || 'USD';
+            const mid = info.merchant_id || info.merchantId || info.merchant || '';
+            const vid = info.variation_id || info.variationId || info.variation || '';
+
+            input.dataset.merchantId = mid;
+            input.dataset.variationId = vid;
+            input.dataset.currency = info.currency || info.currency_code || 'USD';
+
+            // Optional: if missing ids, visually mark + disable
+            if (!mid || !vid) {
+              input.disabled = true;
+              input.title = 'Missing merchant_id/variation_id in matrix data';
+              input.classList.add('price-error');
+            }
+
 
             input.addEventListener('change', handlePriceChange);
             td.appendChild(input);
           } else {
-            td.textContent = '';
+            // ✅ Missing in this location: show "Copy" action
+            const fromLocKey = locationKeys.find(k => r.pricesByLocation?.[k]); // first location that exists
+            const btn = document.createElement('button');
+            btn.textContent = 'Copy';
+            btn.className = 'btn btn-small copy-btn';
+            btn.dataset.gtin = r.gtin || '';
+            btn.dataset.toLocKey = locKey;
+            btn.dataset.fromLocKey = fromLocKey || '';
+            btn.addEventListener('click', handleCopyItemInfo);
+
+            // tag td so we can locate it later if needed
+            td.dataset.gtin = r.gtin || '';
+            td.dataset.locKey = locKey;
+
+            td.appendChild(btn);
           }
 
-          tr.appendChild(td);
 
+          tr.appendChild(td);
         });
 
         tbody.appendChild(tr);
       }
 
       const hasNext = pages[currentPageIndex] && pages[currentPageIndex].nextCursor;
-      pageInfo.textContent = `Page ${currentPageIndex + 1} (${mismatchOnly ? 'Mismatch only' : 'All'} — rows: ${currentRows.length})`;
+      const filtersLabel = [
+        mismatchOnly ? 'Mismatch only' : 'All',
+        missingOnly ? `Missing in ${missingTarget ? locLabel(missingTarget) : '(select store)'}` : null
+      ].filter(Boolean).join(' — ');
+
+      pageInfo.textContent = `Page ${currentPageIndex + 1} (${filtersLabel || 'All'} — rows: ${currentRows.length})`;
       prevBtn.disabled = currentPageIndex <= 0;
       nextBtn.disabled = !hasNext;
     }

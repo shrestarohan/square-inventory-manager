@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Replenishment AI</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    .ai-wrap { display:grid; grid-template-columns: 360px 1fr; gap:16px; margin-top:12px; }
+    .ai-card { background:#fff; border:1px solid #eee; border-radius:12px; padding:12px; box-shadow:0 1px 8px rgba(0,0,0,.03); }
+    .ai-chat { height: 420px; overflow:auto; border:1px solid #eee; border-radius:10px; padding:10px; background:#fafafa; }
+    .msg { margin:8px 0; padding:8px 10px; border-radius:10px; max-width: 92%; }
+    .msg.user { background:#e9f3ff; margin-left:auto; }
+    .msg.ai { background:#fff; border:1px solid #eee; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .row input, .row textarea, .row select { padding:8px; border-radius:8px; border:1px solid #ddd; }
+    .row textarea { width:100%; min-height:72px; }
+    .table-wrap { overflow:auto; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { border-bottom:1px solid #eee; padding:8px; text-align:left; white-space:nowrap; }
+    th { background:#fafafa; position:sticky; top:0; z-index:1; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid #ddd; font-size:12px; }
+    .muted { opacity:.7; }
+    .danger { color:#b42318; }
+
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; }
+    .tab-btn { padding:8px 10px; border-radius:10px; border:1px solid #ddd; background:#fff; cursor:pointer; }
+    .tab-btn.active { border-color:#999; font-weight:600; }
+    .hide { display:none; }
+    .kpi { display:flex; gap:10px; flex-wrap:wrap; }
+    .kpi .pill { background:#fafafa; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:12px; }
+
+    /* ✅ new for plan meta */
+    .meta-line { margin-top:6px; }
+  </style>
+</head>
+<body>
+  <npm u%- include('partials/header', {
+        pageTitle: 'Replenishment AI',
+        currentView: 'replenishment-ai',
+        merchant: typeof merchant !== 'undefined' ? merchant : null,
+        merchantId: typeof merchantId !== 'undefined' ? merchantId : null,
+        merchants: typeof merchants !== 'undefined' ? merchants : [],
+        activePage: 'replenishment-ai'
+      }) %>
+
+  <div class="ai-wrap">
+    <div class="ai-card">
+      <div class="row" style="justify-content:space-between;">
+        <div><strong>AI Planner</strong></div>
+        <span class="pill muted">server-side OpenAI</span>
+      </div>
+
+      <div id="merchantWarn" class="muted danger" style="margin-top:10px; display:none;">
+        Select a merchant from the header dropdown to generate a plan.
+      </div>
+
+      <div style="height:10px"></div>
+
+      <div class="row">
+        <label class="muted">Days</label>
+        <input id="days" type="number" value="84" min="7" max="365" style="width:90px">
+      </div>
+
+      <div style="height:8px"></div>
+
+      <div class="row">
+        <label class="muted">Target DOS</label>
+        <input id="targetDays" type="number" value="21" min="3" max="90" style="width:90px">
+      </div>
+
+      <div style="height:8px"></div>
+
+      <div class="row">
+        <label class="muted">Budget ($)</label>
+        <input id="budget" type="number" placeholder="optional" style="width:150px">
+      </div>
+
+      <!-- ✅ NEW: controls for output size + context safety -->
+      <div style="height:8px"></div>
+
+      <div class="row">
+        <label class="muted">Max lines</label>
+        <input id="maxLines" type="number" value="300" min="10" max="500" style="width:90px">
+      </div>
+              
+      <div style="height:8px"></div>
+
+      <div class="row">
+        <label class="muted">Candidate cap</label>
+        <input id="candidateCap" type="number" value="650" min="100" max="1200" style="width:110px">
+      </div>
+
+      <div style="height:8px"></div>
+
+      <div>
+        <div class="muted" style="margin-bottom:6px;">Notes (priorities, categories, promos)</div>
+        <textarea id="notes" placeholder="Example: prioritize tequila + vodka; avoid slow movers; focus top sellers; keep cash tight this week."></textarea>
+      </div>
+
+      <div style="height:10px"></div>
+
+      <div class="row">
+        <button id="genBtn" class="btn">Generate order plan</button>
+        <button id="auditBtn" class="btn" type="button">Run audit (0 qty + remove list)</button>
+        <span id="status" class="muted"></span>
+      </div>
+
+      <div style="height:12px"></div>
+
+      <div class="ai-chat" id="chat"></div>
+    </div>
+
+    <div class="ai-card">
+      <div class="row" style="justify-content:space-between; align-items:flex-end;">
+        <div>
+          <div class="row" style="gap:10px;">
+            <strong id="rightTitle">Plan</strong>
+            <span class="muted" id="planMeta"></span>
+          </div>
+          <div class="kpi" id="auditMeta" style="margin-top:8px; display:none;"></div>
+          <!-- ✅ NEW: plan meta pills -->
+          <div class="kpi meta-line" id="planMetaPills" style="margin-top:8px; display:none;"></div>
+        </div>
+
+        <div class="tabs">
+          <button class="tab-btn active" id="tabPlan" type="button">Plan</button>
+          <button class="tab-btn" id="tabZero" type="button">0 / Negative</button>
+          <button class="tab-btn" id="tabRemove" type="button">Remove</button>
+        </div>
+      </div>
+
+      <div style="height:10px"></div>
+
+      <!-- ✅ PLAN PANEL -->
+      <div id="panelPlan">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Vendor</th>
+                <th>Item</th>
+                <th>SKU</th>
+                <th>GTIN</th>
+                <th>Qty</th>
+                <th>Unit Cost Est</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody id="planBody">
+              <tr><td colspan="7" class="muted">No plan yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style="height:10px"></div>
+
+        <div>
+          <div class="muted" style="margin-bottom:6px;">Watchlist</div>
+          <ul id="watchlist" class="muted" style="margin-top:0;"></ul>
+        </div>
+      </div>
+
+      <!-- ✅ ZERO / NEGATIVE PANEL -->
+      <div id="panelZero" class="hide">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Recommendation</th>
+                <th>Score</th>
+                <th>Suggested Qty</th>
+                <th>Item</th>
+                <th>On Hand</th>
+                <th>Sold</th>
+                <th>Avg/Day</th>
+                <th>SKU</th>
+                <th>GTIN</th>
+                <th>Vendor</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody id="zeroBody">
+              <tr><td colspan="11" class="muted">Run audit to see items with qty ≤ 0.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ✅ REMOVE PANEL -->
+      <div id="panelRemove" class="hide">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Action</th>
+                <th>Confidence</th>
+                <th>Item</th>
+                <th>On Hand</th>
+                <th>Sold</th>
+                <th>SKU</th>
+                <th>GTIN</th>
+                <th>Vendor</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody id="removeBody">
+              <tr><td colspan="9" class="muted">Run audit to see removal/deactivate candidates.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ✅ raw debug -->
+      <div id="rawBox" class="hide" style="margin-top:10px;">
+        <div class="muted" style="margin-bottom:6px;">Raw (debug)</div>
+        <pre class="mono" id="rawPre" style="max-height:220px; overflow:auto; background:#fafafa; border:1px solid #eee; border-radius:10px; padding:10px;"></pre>
+      </div>
+    </div>
+  </div>
+
+  <%- include('partials/footer') %>
+
+  <script>
+    let MERCHANT_ID = <%- JSON.stringify(merchantId || null) %>;
+
+    const merchantSelect = document.getElementById('merchantSelect');
+
+    function sanitizeMerchantId(x) {
+      return (x || '').toString().trim().replace(/^\/+/, '');
+    }
+
+    if (merchantSelect) {
+      merchantSelect.addEventListener('change', () => {
+        const mid = sanitizeMerchantId(merchantSelect.value || '');
+        if (!mid) {
+          window.location.href = '/replenishment-ai';
+        } else {
+          window.location.href = `/replenishment-ai/${encodeURIComponent(mid)}`;
+        }
+      }, { passive: true });
+    }
+
+    const merchantWarn = document.getElementById('merchantWarn');
+    const chat = document.getElementById('chat');
+    const statusEl = document.getElementById('status');
+    const planBody = document.getElementById('planBody');
+    const planMeta = document.getElementById('planMeta');
+    const planMetaPills = document.getElementById('planMetaPills');
+    const watchlist = document.getElementById('watchlist');
+
+    const auditBtn = document.getElementById('auditBtn');
+    const zeroBody = document.getElementById('zeroBody');
+    const removeBody = document.getElementById('removeBody');
+    const auditMeta = document.getElementById('auditMeta');
+
+    const tabPlan = document.getElementById('tabPlan');
+    const tabZero = document.getElementById('tabZero');
+    const tabRemove = document.getElementById('tabRemove');
+    const panelPlan = document.getElementById('panelPlan');
+    const panelZero = document.getElementById('panelZero');
+    const panelRemove = document.getElementById('panelRemove');
+    const rightTitle = document.getElementById('rightTitle');
+
+    const rawBox = document.getElementById('rawBox');
+    const rawPre = document.getElementById('rawPre');
+
+    const daysEl = document.getElementById('days');
+    const targetDaysEl = document.getElementById('targetDays');
+    const budgetEl = document.getElementById('budget');
+    const maxLinesEl = document.getElementById('maxLines');       // ✅ NEW
+    const candidateCapEl = document.getElementById('candidateCap'); // ✅ NEW
+    const notesEl = document.getElementById('notes');
+    const genBtn = document.getElementById('genBtn');
+
+    function setMerchantWarn(on) {
+      merchantWarn.style.display = on ? 'block' : 'none';
+      genBtn.disabled = !!on;
+      auditBtn.disabled = !!on;
+    }
+
+    MERCHANT_ID = MERCHANT_ID ? sanitizeMerchantId(MERCHANT_ID) : null;
+    setMerchantWarn(!MERCHANT_ID);
+
+    function addMsg(role, text) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
+      div.textContent = text;
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function money(n) {
+      const x = Number(n);
+      if (!Number.isFinite(x)) return '';
+      return x.toFixed(2);
+    }
+
+    function setTabs(active) {
+      tabPlan.classList.toggle('active', active === 'plan');
+      tabZero.classList.toggle('active', active === 'zero');
+      tabRemove.classList.toggle('active', active === 'remove');
+
+      panelPlan.classList.toggle('hide', active !== 'plan');
+      panelZero.classList.toggle('hide', active !== 'zero');
+      panelRemove.classList.toggle('hide', active !== 'remove');
+
+      rightTitle.textContent =
+        active === 'plan' ? 'Plan' :
+        active === 'zero' ? '0 / Negative' :
+        'Remove';
+    }
+
+    tabPlan.addEventListener('click', () => setTabs('plan'));
+    tabZero.addEventListener('click', () => setTabs('zero'));
+    tabRemove.addEventListener('click', () => setTabs('remove'));
+
+    function showRawDebug(obj) {
+      try {
+        rawPre.textContent = JSON.stringify(obj, null, 2);
+        rawBox.classList.remove('hide');
+      } catch (_) {}
+    }
+
+    function hideRawDebug() {
+      rawBox.classList.add('hide');
+      rawPre.textContent = '';
+    }
+
+    function renderPlanMetaPills(meta) {
+      if (!meta) {
+        planMetaPills.style.display = 'none';
+        planMetaPills.innerHTML = '';
+        return;
+      }
+      planMetaPills.style.display = 'flex';
+      planMetaPills.innerHTML = '';
+
+      function pill(txt) {
+        const span = document.createElement('span');
+        span.className = 'pill muted';
+        span.textContent = txt;
+        planMetaPills.appendChild(span);
+      }
+
+      if (meta.candidatesSent != null && meta.candidatesTotal != null) {
+        pill(`Candidates: ${meta.candidatesSent}/${meta.candidatesTotal}`);
+      }
+      if (meta.candidateCap != null) pill(`Cap: ${meta.candidateCap}`);
+      if (meta.snapshotCounts?.inventoryDocs != null) pill(`Inv: ${meta.snapshotCounts.inventoryDocs}`);
+      if (meta.snapshotCounts?.topSellers != null) pill(`TopSellers: ${meta.snapshotCounts.topSellers}`);
+      if (meta.snapshotCounts?.zeroOrNegative != null) pill(`0/Neg pool: ${meta.snapshotCounts.zeroOrNegative}`);
+    }
+
+    function renderPlan(plan) {
+      const lines = [];
+      const buckets = Array.isArray(plan.vendorBuckets) ? plan.vendorBuckets : [];
+
+      buckets.forEach(b => {
+        const vendor = b.vendor || 'Unknown Vendor';
+        const poLines = Array.isArray(b.poLines) ? b.poLines : [];
+        poLines.forEach(l => lines.push({ vendor, ...l }));
+      });
+
+      if (!lines.length) {
+        planBody.innerHTML = '<tr><td colspan="7" class="muted">Plan returned 0 lines.</td></tr>';
+      } else {
+        planBody.innerHTML = '';
+        lines.forEach(row => {
+          const tr = document.createElement('tr');
+
+          function td(txt) {
+            const c = document.createElement('td');
+            c.textContent = (txt ?? '').toString();
+            return c;
+          }
+
+          tr.appendChild(td(row.vendor));
+          tr.appendChild(td(row.item_name || ''));
+          tr.appendChild(td(row.sku || ''));
+          tr.appendChild(td(row.gtin || ''));
+          tr.appendChild(td(row.qty || 0));
+          tr.appendChild(td(money(row.unit_cost_est)));
+          tr.appendChild(td(row.reason || ''));
+
+          planBody.appendChild(tr);
+        });
+      }
+
+      const s = plan.summary || {};
+      planMeta.textContent =
+        s.lineCount != null
+          ? `• ${s.lineCount} lines • est $${money(s.estimatedTotalCost)}`
+          : '';
+
+      const wl = Array.isArray(plan.watchlist) ? plan.watchlist : [];
+      watchlist.innerHTML = '';
+      wl.forEach(x => {
+        const li = document.createElement('li');
+        li.textContent = `${x.item_name || x.variation_id}: ${x.reason || ''}`;
+        watchlist.appendChild(li);
+      });
+
+      return lines.length;
+    }
+
+    function renderAudit(audit) {
+      const zero = Array.isArray(audit.zeroOnHandRatings) ? audit.zeroOnHandRatings : [];
+      const rem = Array.isArray(audit.removeOrDeactivate) ? audit.removeOrDeactivate : [];
+      const s = audit.summary || {};
+
+      auditMeta.style.display = 'flex';
+      auditMeta.innerHTML = '';
+      function pill(txt) {
+        const span = document.createElement('span');
+        span.className = 'pill muted';
+        span.textContent = txt;
+        auditMeta.appendChild(span);
+      }
+      if (s.days != null) pill(`Days: ${s.days}`);
+      if (s.zeroCount != null) pill(`0/Neg: ${s.zeroCount}`);
+      if (s.removeCandidateCount != null) pill(`Remove candidates: ${s.removeCandidateCount}`);
+      if (s.generatedAt) pill(`Generated: ${new Date(s.generatedAt).toLocaleString()}`);
+
+      if (!zero.length) {
+        zeroBody.innerHTML = '<tr><td colspan="11" class="muted">No zero/negative items returned.</td></tr>';
+      } else {
+        zeroBody.innerHTML = '';
+        zero.slice(0, 500).forEach(r => {
+          const tr = document.createElement('tr');
+          function td(txt) {
+            const c = document.createElement('td');
+            c.textContent = (txt ?? '').toString();
+            return c;
+          }
+          tr.appendChild(td(r.recommendation || ''));
+          tr.appendChild(td(r.score_order_now != null ? r.score_order_now : ''));
+          tr.appendChild(td(r.suggested_qty != null ? r.suggested_qty : ''));
+          tr.appendChild(td(r.item_name || ''));
+          tr.appendChild(td(r.on_hand != null ? r.on_hand : ''));
+          tr.appendChild(td(r.sold_units != null ? r.sold_units : ''));
+          tr.appendChild(td(r.avg_daily_units != null ? r.avg_daily_units : ''));
+          tr.appendChild(td(r.sku || ''));
+          tr.appendChild(td(r.gtin || ''));
+          tr.appendChild(td(r.vendor || ''));
+          tr.appendChild(td(r.reason || ''));
+          zeroBody.appendChild(tr);
+        });
+      }
+
+      if (!rem.length) {
+        removeBody.innerHTML = '<tr><td colspan="9" class="muted">No remove/deactivate items returned.</td></tr>';
+      } else {
+        removeBody.innerHTML = '';
+        rem.slice(0, 500).forEach(r => {
+          const tr = document.createElement('tr');
+          function td(txt) {
+            const c = document.createElement('td');
+            c.textContent = (txt ?? '').toString();
+            return c;
+          }
+          tr.appendChild(td(r.action || ''));
+          tr.appendChild(td(r.confidence != null ? r.confidence : ''));
+          tr.appendChild(td(r.item_name || ''));
+          tr.appendChild(td(r.on_hand != null ? r.on_hand : ''));
+          tr.appendChild(td(r.sold_units != null ? r.sold_units : ''));
+          tr.appendChild(td(r.sku || ''));
+          tr.appendChild(td(r.gtin || ''));
+          tr.appendChild(td(r.vendor || ''));
+          tr.appendChild(td(r.reason || ''));
+          removeBody.appendChild(tr);
+        });
+      }
+    }
+
+    genBtn.addEventListener('click', async () => {
+      if (!MERCHANT_ID) {
+        setMerchantWarn(true);
+        alert('Select a merchant from the header dropdown first.');
+        return;
+      }
+
+      hideRawDebug();
+
+      const days = Number(daysEl.value || 84);
+      const targetDays = Number(targetDaysEl.value || 21);
+      const budgetRaw = (budgetEl.value || '').toString().trim();
+      const budget = budgetRaw ? Number(budgetRaw) : null;
+      const maxLines = Number(maxLinesEl.value || 300);          // ✅ NEW
+      const candidateCap = Number(candidateCapEl.value || 650);  // ✅ NEW
+      const notes = (notesEl.value || '').toString().trim();
+
+      addMsg('user', `Generate replenishment plan for ${MERCHANT_ID}: days=${days}, targetDOS=${targetDays}, maxLines=${maxLines}, cap=${candidateCap}${budget ? ', budget=$'+budget : ''}.${notes ? ' Notes: '+notes : ''}`);
+      statusEl.textContent = 'Thinking…';
+      genBtn.disabled = true;
+      auditBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/replenishment-ai/plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ merchantId: MERCHANT_ID, days, targetDays, budget, maxLines, candidateCap, notes }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          if (data && data.raw) showRawDebug(data);
+          throw new Error(data.error || 'AI plan failed');
+        }
+
+        const lineCount = renderPlan(data.plan);
+        renderPlanMetaPills(data.meta); // ✅ NEW
+
+        addMsg('ai', `Plan generated with ${lineCount} lines. Review the Plan tab/table.`);
+        if (data.meta?.candidatesSent != null && data.meta?.candidatesTotal != null) {
+          addMsg('ai', `Used ${data.meta.candidatesSent}/${data.meta.candidatesTotal} candidates (cap=${data.meta.candidateCap}).`);
+        }
+
+        setTabs('plan');
+
+      } catch (e) {
+        console.error(e);
+        addMsg('ai', 'Error: ' + e.message);
+        alert(e.message);
+      } finally {
+        statusEl.textContent = '';
+        genBtn.disabled = false;
+        auditBtn.disabled = false;
+        setMerchantWarn(!MERCHANT_ID);
+      }
+    });
+
+    auditBtn.addEventListener('click', async () => {
+      if (!MERCHANT_ID) {
+        setMerchantWarn(true);
+        alert('Select a merchant from the header dropdown first.');
+        return;
+      }
+
+      hideRawDebug();
+
+      const days = Number(daysEl.value || 84);
+      const notes = (notesEl.value || '').toString().trim();
+
+      addMsg('user', `Run audit for ${MERCHANT_ID}: days=${days}.${notes ? ' Notes: '+notes : ''}`);
+      statusEl.textContent = 'Auditing…';
+      genBtn.disabled = true;
+      auditBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/replenishment-ai/audit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({
+            merchantId: MERCHANT_ID,
+            days,
+            notes,
+            includeTopSellers: false,
+            includeZeroOrNegative: true,
+            includeRemovalCandidates: true
+          }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          if (data && data.raw) showRawDebug(data);
+          throw new Error(data.error || 'AI audit failed');
+        }
+
+        addMsg('ai', 'Audit generated. Check the 0/Negative and Remove tabs.');
+        renderAudit(data.audit);
+        setTabs('zero');
+
+      } catch (e) {
+        console.error(e);
+        addMsg('ai', 'Error: ' + e.message);
+        alert(e.message);
+      } finally {
+        statusEl.textContent = '';
+        genBtn.disabled = false;
+        auditBtn.disabled = false;
+        setMerchantWarn(!MERCHANT_ID);
+      }
+    });
+  </script>
+</body>
+</html>
