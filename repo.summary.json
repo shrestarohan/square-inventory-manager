@@ -120,6 +120,10 @@
       "type": "file"
     },
     {
+      "name": "repo.summary.json",
+      "type": "file"
+    },
+    {
       "name": "routes",
       "type": "dir"
     },
@@ -147,6 +151,7 @@
   "binScripts": [
     "deploy_square_inventory_sync.sh",
     "generate_readme_ai.js",
+    "git_push_current.sh",
     "run_cloud_job.sh",
     "scan_repo.js",
     "sync_firestore_db.sh"
@@ -497,6 +502,7 @@
     "COST_SHEET_RANGE",
     "DRY_RUN",
     "ENV_FILE",
+    "ENV_PATH",
     "FIRESTORE_DATABASE_ID",
     "FIX",
     "GCLOUD_PROJECT",

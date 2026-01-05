@@ -1,0 +1,370 @@
+{
+  "generatedAt": "2026-01-05T07:13:15.512Z",
+  "docker": {
+    "from": "node:22-alpine",
+    "workdir": "/app",
+    "cmd": null
+  },
+  "counts": {
+    "files": 109,
+    "js": 78,
+    "sh": 4
+  },
+  "checks": {
+    "hasGitignore": true,
+    "hasDockerignore": true
+  },
+  "ignoreSnippets": {
+    "gitignoreHead": [
+      "# Node dependencies",
+      "node_modules/",
+      "npm-debug.log*",
+      "yarn-debug.log*",
+      "yarn-error.log*",
+      "pnpm-lock.yaml",
+      "",
+      "# Logs",
+      "logs/",
+      "*.log",
+      "log.txt",
+      "npm-debug.log*",
+      "yarn-debug.log*",
+      "yarn-error.log*",
+      "debug.log",
+      "",
+      "# Runtime data",
+      "pids/",
+      "*.pid",
+      "*.seed",
+      "*.pid.lock",
+      "",
+      "# Coverage / test output",
+      "coverage/",
+      ".nyc_output/",
+      "jest-html-reporters-*/",
+      "",
+      "# Build output",
+      "dist/",
+      "build/",
+      ".tmp/",
+      "",
+      "# Env & secrets",
+      ".env",
+      ".env.*",
+      "*.env.local",
+      "credentials.json",
+      "service-account.json",
+      "*.pem",
+      "*.key"
+    ],
+    "dockerignoreHead": [
+      ""
+    ]
+  },
+  "envFiles": [
+    "secrets/.env",
+    "secrets/.env.deploy"
+  ],
+  "envKeyByFile": {
+    "secrets/.env": [
+      "ALLOWED_EMAILS",
+      "APP_ENV",
+      "COST_SHEET_ID",
+      "COST_SHEET_RANGE",
+      "CRON_SECRET",
+      "FIRESTORE_DATABASE_ID",
+      "GOOGLE_CALLBACK_URL",
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+      "GOOGLE_CLOUD_PROJECT",
+      "IDEA_COUNT",
+      "OPENAI_API_KEY",
+      "OPENAI_MODEL",
+      "SESSION_SECRET",
+      "SLACK_WEBHOOK_URL",
+      "SQUARE_ACCESS_TOKEN",
+      "SQUARE_ENV",
+      "USE_FIRESTORE_CACHE",
+      "USE_SQUARE_API",
+      "WINDOW_DAYS"
+    ],
+    "secrets/.env.deploy": [
+      "ALLOWED_EMAILS",
+      "APP_ENV",
+      "COST_SHEET_ID",
+      "COST_SHEET_RANGE",
+      "CRON_SECRET",
+      "FIRESTORE_DATABASE_ID",
+      "GOOGLE_CALLBACK_URL",
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+      "GOOGLE_CLOUD_PROJECT",
+      "IDEA_COUNT",
+      "OPENAI_API_KEY",
+      "OPENAI_MODEL",
+      "SESSION_SECRET",
+      "SLACK_WEBHOOK_URL",
+      "SQUARE_ACCESS_TOKEN",
+      "SQUARE_ENV",
+      "SQUARE_REDIRECT_URI",
+      "USE_FIRESTORE_CACHE",
+      "USE_SQUARE_API",
+      "WINDOW_DAYS"
+    ]
+  },
+  "envKeysInCode": [
+    "ALLOWED_EMAILS",
+    "APP_ENV",
+    "BATCH_SIZE",
+    "CLEAN_DERIVED",
+    "CLEAN_ONLY",
+    "CONFIRM_DELETE",
+    "COST_SHEET_ID",
+    "COST_SHEET_RANGE",
+    "DRY_RUN",
+    "ENV_FILE",
+    "ENV_PATH",
+    "FIRESTORE_DATABASE_ID",
+    "FIX",
+    "GCLOUD_PROJECT",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GOOGLE_CALLBACK_URL",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GOOGLE_CLOUD_PROJECT",
+    "GTIN",
+    "GTINS",
+    "GTIN_SAMPLE_LIMIT",
+    "IDEA_COUNT",
+    "ITEM_LIMIT",
+    "ITEM_NAME_COLLECTION",
+    "JEST_WORKER_ID",
+    "K_SERVICE",
+    "LIMIT",
+    "LIMIT_GTINS",
+    "LIMIT_PER_MERCHANT",
+    "MERCHANT_ID",
+    "MERCHANT_IDS",
+    "MERCHANT_LABELS",
+    "NODE_ENV",
+    "NORMALIZE_INVENTORY",
+    "ONLY_UNSYNCED",
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL",
+    "PORT",
+    "READ_PAGE",
+    "REBUILD",
+    "SAMPLE_LIMIT",
+    "SESSION_SECRET",
+    "SLEEP_MS",
+    "SQUARE_ACCESS_TOKEN",
+    "SQUARE_APP_ID",
+    "SQUARE_APP_SECRET",
+    "SQUARE_ENV",
+    "SQUARE_LOCATION_IDS",
+    "SQUARE_REDIRECT_URI",
+    "SQUARE_REDIRECT_URI_DEV",
+    "SQUARE_REDIRECT_URI_PROD",
+    "TARGET_GTIN",
+    "TARGET_MERCHANT_ID",
+    "USE_FIRESTORE_CACHE",
+    "USE_SQUARE_API",
+    "WINDOW_DAYS",
+    "WRITE_BATCH"
+  ],
+  "envMissingFromEnvFiles": [
+    "BATCH_SIZE",
+    "CLEAN_DERIVED",
+    "CLEAN_ONLY",
+    "CONFIRM_DELETE",
+    "DRY_RUN",
+    "ENV_FILE",
+    "ENV_PATH",
+    "FIX",
+    "GCLOUD_PROJECT",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GTIN",
+    "GTINS",
+    "GTIN_SAMPLE_LIMIT",
+    "ITEM_LIMIT",
+    "ITEM_NAME_COLLECTION",
+    "JEST_WORKER_ID",
+    "K_SERVICE",
+    "LIMIT",
+    "LIMIT_GTINS",
+    "LIMIT_PER_MERCHANT",
+    "MERCHANT_ID",
+    "MERCHANT_IDS",
+    "MERCHANT_LABELS",
+    "NODE_ENV",
+    "NORMALIZE_INVENTORY",
+    "ONLY_UNSYNCED",
+    "PORT",
+    "READ_PAGE",
+    "REBUILD",
+    "SAMPLE_LIMIT",
+    "SLEEP_MS",
+    "SQUARE_APP_ID",
+    "SQUARE_APP_SECRET",
+    "SQUARE_LOCATION_IDS",
+    "SQUARE_REDIRECT_URI_DEV",
+    "SQUARE_REDIRECT_URI_PROD",
+    "TARGET_GTIN",
+    "TARGET_MERCHANT_ID",
+    "WRITE_BATCH"
+  ],
+  "envUnusedByCode": [
+    "CRON_SECRET",
+    "SLACK_WEBHOOK_URL"
+  ],
+  "gcloudByFile": [
+    {
+      "file": "bin/deploy_square_inventory_sync.sh",
+      "gcloudLines": [
+        {
+          "line": 61,
+          "text": "gcloud builds submit --tag \"${IMAGE}\""
+        },
+        {
+          "line": 64,
+          "text": "gcloud run deploy \"${SERVICE_NAME}\" \\"
+        },
+        {
+          "line": 111,
+          "text": "gcloud run services update-traffic \"${SERVICE_NAME}\" \\"
+        }
+      ]
+    },
+    {
+      "file": "bin/run_cloud_job.sh",
+      "gcloudLines": [
+        {
+          "line": 92,
+          "text": "  gcloud config set project \"$PROJECT_ID\" >/dev/null"
+        },
+        {
+          "line": 93,
+          "text": "  gcloud builds submit --tag \"$IMAGE\""
+        },
+        {
+          "line": 143,
+          "text": "  gcloud config set project \"$PROJECT_ID\" >/dev/null"
+        },
+        {
+          "line": 161,
+          "text": "  gcloud run jobs update \"$JOB\" \\"
+        },
+        {
+          "line": 172,
+          "text": "  gcloud config set project \"$PROJECT_ID\" >/dev/null"
+        },
+        {
+          "line": 201,
+          "text": "  gcloud run jobs update \"$JOB\" \\"
+        },
+        {
+          "line": 208,
+          "text": "  gcloud run jobs execute \"$JOB\" --region \"$REGION\""
+        }
+      ]
+    },
+    {
+      "file": "bin/sync_firestore_db.sh",
+      "gcloudLines": [
+        {
+          "line": 58,
+          "text": "  gcloud config set project \"$PROJECT\" >/dev/null"
+        },
+        {
+          "line": 59,
+          "text": "  gcloud firestore databases list"
+        },
+        {
+          "line": 82,
+          "text": "gcloud config set project \"$PROJECT\" >/dev/null"
+        },
+        {
+          "line": 148,
+          "text": "gcloud firestore export \"$EXPORT_PATH\" --database=\"$SOURCE_DB\""
+        },
+        {
+          "line": 155,
+          "text": "    gcloud firestore databases delete --database=\"$TARGET_DB\" --quiet"
+        },
+        {
+          "line": 162,
+          "text": "  gcloud firestore databases create --database=\"$TARGET_DB\" --location=\"$SRC_LOCATION\""
+        },
+        {
+          "line": 170,
+          "text": "gcloud firestore import \"$EXPORT_PATH\" --database=\"$TARGET_DB\""
+        }
+      ]
+    }
+  ],
+  "pathDriftByFile": [
+    {
+      "file": "Dockerfile",
+      "drift": [
+        "WORKDIR /app"
+      ]
+    },
+    {
+      "file": "bin/cleanup_audit.js",
+      "drift": [
+        "/usr/src/app",
+        "WORKDIR /usr/src/app",
+        "WORKDIR /app",
+        "/app"
+      ]
+    },
+    {
+      "file": "bin/run_cloud_job.sh",
+      "drift": [
+        "/usr/src/app",
+        "/app"
+      ]
+    }
+  ],
+  "secretsFindings": [
+    {
+      "file": "bin/deploy_square_inventory_sync.sh",
+      "patterns": [
+        "Generic *_SECRET assignment"
+      ]
+    },
+    {
+      "file": "bin/run_cloud_job.sh",
+      "patterns": [
+        "Generic *_SECRET assignment"
+      ]
+    },
+    {
+      "file": "routes/squareOAuth.js",
+      "patterns": [
+        "Generic *_SECRET assignment"
+      ]
+    }
+  ],
+  "likelyDeadJs": [
+    "__tests__/gtinMatrixRoute.test.js",
+    "__tests__/health.test.js",
+    "__tests__/jest.setup.js",
+    "auth/passportConfig.js",
+    "jest.config.js"
+  ],
+  "topLevel": [
+    ".dockerignore",
+    ".gitignore",
+    "Dockerfile",
+    "LICENSE",
+    "README.md",
+    "app.js",
+    "jest.config.js",
+    "package-lock.json",
+    "package.json",
+    "repo.cleanup.json",
+    "repo.summary.json",
+    "server.js"
+  ]
+}

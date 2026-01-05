@@ -1,457 +1,456 @@
 # Project Overview
 
-square-inventory-sync is a Node.js application that coordinates inventory and catalog data between Firestore and Square. The repository contains an Express app, a collection of maintenance and sync scripts, route handlers for both API and UI pages, and helper libraries for Firestore and environment handling. The project is built to run locally (development), in Docker, and in Google Cloud Run (including Cloud Run jobs).
+square-inventory-sync is a Node.js service designed to synchronize and manage inventory data across Square and Firestore (and related systems). It provides a web UI and a set of API endpoints and scripts for daily syncs, GTIN handling, inventory reconciliation, category syncs, image copying, and other inventory operations. The repository includes Cloud Run deployment helpers and a set of CLI/bin scripts to automate builds and job execution.
 
-This README documents the code layout, environment configuration, common developer workflows, how to run cloud jobs, route surface area, and troubleshooting tips based strictly on the repository contents.
-
-# Key Features
-
-- Express-based server with route handlers for inventory, categories, replenishment, auth, and admin tasks.
-- Scripts for syncing inventory, GTIN metadata, pushing names and categories to Square, and rebuilding master inventory.
-- Integration with Google Firestore (via @google-cloud/firestore).
-- Square SDK usage for interacting with Square APIs (square).
-- Optional OpenAI usage (openai) and Algolia (algoliasearch) integrations referenced in dependencies.
-- Auth support with Passport.js and Google OAuth (passport-google-oauth20).
-- Image processing (sharp) and file uploads (multer).
-- Several convenience bin scripts for deploying to Cloud Run and for running Cloud Run jobs.
-
-# Tech Stack
-
-- Runtime: Node.js (Docker base image node:22-alpine)
-- Server: Express.js
-- Authentication: passport, passport-local, passport-google-oauth20
-- Database: Google Firestore (@google-cloud/firestore)
-- Square integration: square SDK
-- Utilities & integrations: axios, googleapis, algoliasearch, openai
-- Image processing: sharp
-- File upload: multer
-- Dev/test: nodemon, jest, supertest
-- Packaging: npm (scripts defined in package.json)
-
-# Repository Layout
-
-Top-level items (major folders/files and their roles inferred from names)
-
-- app.js — Main Express application entry (routes mounted, middleware configured). Also exposes paths such as /healthz and /debug/env per routes listing.
-- server.js — Likely responsible for starting the HTTP server (top-level file present).
-- Dockerfile — Docker build configuration (Docker base image given as node:22-alpine).
-- bin/ — Contains utility shell and node scripts for deploy and operational tasks:
-  - deploy_square_inventory_sync.sh
-  - generate_readme_ai.js
-  - run_cloud_job.sh
-  - scan_repo.js
-  - sync_firestore_db.sh
-- routes/ — Express route handlers (API and page routes). Many files provide endpoints used by front-end and API clients (see "API / Routes" section).
-- scripts/ — Batch and one-off scripts to sync data, rebuild indices, migrate taxonomy, etc. Many npm script entries map to these files.
-- lib/ — Helper libraries, notably:
-  - lib/firestore.js — Firestore helper module
-  - lib/loadEnv.js — Environment loader helper
-- services/ — Likely contains business logic and service wrappers (names present but detailed contents not enumerated).
-- auth/ — Authentication strategies and helpers (passport config likely lives here).
-- middleware/ — Express middleware modules.
-- public/ — Static assets served to UI.
-- views/ — EJS views (ejs is a dependency).
-- secrets/ — Directory to hold secrets or secret mount points (used in Cloud Run or local secrets handling).
-- __tests__/ — Jest tests for units/integration.
-- .github/ — GitHub workflows or actions.
-- gpush.sh — Shell helper (purpose not explicit in JSON; placeholder).
-- README.md — This file.
-- LICENSE, .gitignore, .dockerignore — standard repo files.
-- package.json / package-lock.json / jest.config.js — Node metadata and test config.
-
-# Getting Started (local dev)
-
-Prerequisites:
-- Node.js compatible with node:22-alpine (Node 22).
-- npm installed.
-- If you need Firestore local emulator or Google credentials for tests/dev, follow Google Cloud SDK guidance (not included here).
-
-Install:
-- Install dependencies:
-  npm install
-
-Common local scripts:
-- Start production-mode node server:
-  npm run start
-  (runs: node server.js)
-
-- Start development server with nodemon and increased heap:
-  npm run dev
-  (runs: NODE_OPTIONS=--max-old-space-size=8192 nodemon app.js)
-
-- Run tests:
-  npm test
-  npm run test:watch
-  npm run test:ci
-
-Run a specific sync script (examples):
-- Sync inventory (one-off script):
-  npm run sync:inventory
-  (runs node scripts/syncInventory.js)
-
-- Sync GTIN metadata from a sheet to Firestore:
-  npm run sync:gtin-meta
-  (runs node scripts/syncSheetToFirestore.js)
-
-- Proper-case item names script:
-  npm run proper:item-names
-  (runs node scripts/properCaseItemNames.js)
-
-Notes:
-- Many scripts accept environment variables for behavior (see Configuration). If you use an .env file, ensure loadEnv/lib/loadEnv.js is configured to load it; otherwise set needed env vars in your shell.
-
-# Configuration (Environment Variables)
-
-Below is the list of environment keys present in the repository. The short descriptions reflect likely usage based strictly on the key names—do not treat these as exact values. Do not guess actual secrets or values; set them for your environment.
-
-- ALLOWED_EMAILS — Comma-separated emails allowed to access the app (used in auth gating).
-- APP_ENV — Application environment identifier (e.g., development/staging/production).
-- BATCH_SIZE — Batch size for batched operations (scripts or API calls).
-- CLEAN_DERIVED — Flag controlling cleaning of derived data.
-- CLEAN_ONLY — Flag to run clean-only operations.
-- CONFIRM_DELETE — Safety flag required to confirm delete operations.
-- COST_SHEET_ID — Google Sheet ID for cost data.
-- COST_SHEET_RANGE — Range within the sheet for cost data.
-- DRY_RUN — When true, scripts should not persist changes.
-- ENV_FILE — Path to an env file to load (may be used by lib/loadEnv.js).
-- FIRESTORE_DATABASE_ID — Firestore Database ID to target multi-database setups.
-- FIX — Flag to apply fixes vs. just report.
-- GCLOUD_PROJECT — Google Cloud project id.
-- GOOGLE_APPLICATION_CREDENTIALS — Path to service account JSON credentials for Google APIs.
-- GOOGLE_CALLBACK_URL — OAuth callback URL for Google auth.
-- GOOGLE_CLIENT_ID — OAuth client id for Google.
-- GOOGLE_CLIENT_SECRET — OAuth client secret for Google.
-- GOOGLE_CLOUD_PROJECT — Alternate/duplicate name for Google project id (both exist).
-- GTIN — Specific GTIN for single-item scripts.
-- GTINS — Comma-separated GTINs for batch processing.
-- GTIN_SAMPLE_LIMIT — Limit sample GTINs for sampling scripts.
-- IDEA_COUNT — Likely a count parameter for AI-generated ideas or suggestions.
-- ITEM_LIMIT — Limit number of items processed.
-- ITEM_NAME_COLLECTION — Firestore collection name for item names.
-- JEST_WORKER_ID — Jest internal worker id (used by jest).
-- K_SERVICE — Cloud Run service name environment variable present in Cloud Run.
-- LIMIT — Generic limit parameter for scripts or APIs.
-- LIMIT_GTINS — Limit for GTINs processed.
-- LIMIT_PER_MERCHANT — Per-merchant limit.
-- MERCHANT_ID — Single merchant id target.
-- MERCHANT_IDS — Comma-separated merchant ids.
-- MERCHANT_LABELS — Labels for merchants (comma-separated).
-- NODE_ENV — Node environment variable.
-- NORMALIZE_INVENTORY — Flag to normalize inventory values.
-- ONLY_UNSYNCED — Flag to process only unsynced records.
-- OPENAI_API_KEY — OpenAI API key (if using openai dependency).
-- OPENAI_MODEL — OpenAI model identifier.
-- PORT — HTTP port for server.
-- READ_PAGE — Page token or read limit for paginated reads.
-- REBUILD — Flag to trigger rebuilds.
-- SAMPLE_LIMIT — Sample limit for scripts.
-- SESSION_SECRET — Express session secret.
-- SLEEP_MS — Sleep/delay in milliseconds for throttling scripts.
-- SQUARE_ACCESS_TOKEN — Square API access token.
-- SQUARE_APP_ID — Square application id.
-- SQUARE_APP_SECRET — Square app secret.
-- SQUARE_ENV — Square environment (e.g., sandbox/production).
-- SQUARE_LOCATION_IDS — Comma-separated Square location ids.
-- SQUARE_REDIRECT_URI — OAuth redirect URI for Square.
-- SQUARE_REDIRECT_URI_DEV — Dev redirect URI for Square.
-- SQUARE_REDIRECT_URI_PROD — Prod redirect URI for Square.
-- TARGET_GTIN — Target GTIN for certain operations.
-- TARGET_MERCHANT_ID — Target merchant id.
-- USE_FIRESTORE_CACHE — Flag to enable Firestore response caching.
-- USE_SQUARE_API — Flag to toggle Square API calls vs. dry logic.
-- WINDOW_DAYS — Window in days for lookback-based scripts.
-- WRITE_BATCH — Number of writes per Firestore batch operation.
-
-If a configuration key is unclear for your environment, create a local .env and set placeholders, and then securely inject production secrets into Cloud Run (see Cloud Run Jobs Notes & Security Notes).
-
-# Common Workflows
-
-Build and run locally:
-- Install deps and run dev server:
-  npm install
-  npm run dev
-
-Run production server locally:
-- Start server.js:
-  npm run start
-  NODE_ENV=production PORT=8080 npm run start
-
-Run tests:
-- Run Jest once:
-  npm test
-- Run Jest in watch mode:
-  npm run test:watch
-- CI-friendly jest:
-  npm run test:ci
-
-Run scripts:
-- Run inventory sync (example):
-  npm run sync:inventory
-- Rebuild master inventory:
-  npm run rebuild:master-inventory
-- Sync missing items to Square:
-  npm run sync:missing-items-to-square
-
-Docker build and run (based on Dockerfile and Docker metadata):
-- Build image (tag example):
-  docker build -t gcr.io/<PROJECT_ID>/square-inventory-sync:latest .
-- Run container:
-  docker run -e PORT=8080 -p 8080:8080 gcr.io/<PROJECT_ID>/square-inventory-sync:latest
-
-Deploy to Cloud Run (examples inspired by bin/deploy_square_inventory_sync.sh):
-- Build and push:
-  gcloud builds submit --tag "${IMAGE}"
-- Deploy:
-  gcloud run deploy "${SERVICE_NAME}" \
-    --image="${IMAGE}" \
-    --region="${REGION}" \
-    --platform=managed
-- Update traffic:
-  gcloud run services update-traffic "${SERVICE_NAME}" --to-latest
-
-Run Cloud Run Job (from bin/run_cloud_job.sh pattern):
-- Example sequence (replace placeholders):
-  gcloud config set project "$PROJECT_ID"
-  gcloud builds submit --tag "$IMAGE"
-  gcloud run jobs update "$JOB" --image "$IMAGE" --region "$REGION"
-  gcloud run jobs execute "$JOB" --region "$REGION"
-
-Firestore sync utilities:
-- There are bin scripts for exporting/importing Firestore; example flow based on bin/sync_firestore_db.sh:
-  gcloud config set project "$PROJECT"
-  gcloud firestore export "$EXPORT_PATH" --database="$SOURCE_DB"
-  gcloud firestore databases delete --database="$TARGET_DB" --quiet
-  gcloud firestore databases create --database="$TARGET_DB" --location="$SRC_LOCATION"
-  gcloud firestore import "$EXPORT_PATH" --database="$TARGET_DB"
-
-# API / Routes
-
-Below is a grouping of routes by file with the HTTP method and path as found in the repository routing list.
-
-app.js
-- GET /healthz
-- GET /
-- GET /debug/env
-
-routes/apiUpdates.js
-- POST /api/update-price
-- POST /api/update-item-name
-
-routes/auth.js
-- GET /login
-- POST /login
-- GET /auth/google
-- GET /auth/google/callback
-- POST /logout
-
-routes/categoriesList.js
-- GET /api/categories
-
-routes/categoriesRename.js
-- POST /api/categories/rename
-
-routes/categoryActions.js
-- POST /api/categories/copy
-- POST /api/categories/delete-all
-
-routes/categoryMatrix.js
-- GET /api/category-matrix
-
-routes/categorySync.js
-- POST /api/categories/sync-from-square
-
-routes/copyItemInfo.js
-- POST /api/copy-item-info
-
-routes/deleteGtin.js
-- POST /delete-item
-
-routes/gtinDuplicates.js
-- GET /api/gtin-duplicates
-
-routes/gtinInventoryMatrix.js
-- GET /api/duplicates-inventory-matrix
-
-routes/gtinInventoryMatrixConsolidated.js
-- GET /api/gtin-inventory-matrix
-
-routes/gtinMatrix.js
-- GET /api/gtin-matrix
-
-routes/gtinMeta.js
-- GET /api/gtin-meta
-- PUT /api/gtin-meta/:gtin
-
-routes/indexPages.js
-- GET /
-- GET /reorder
-- GET /dashboard
-- GET /dashboard/:merchantId
-- GET /dashboard-gtin
-- GET /duplicates-gtin
-- GET /dashboard-vendor-costs
-- GET /inventory-integrity
-- GET /reports
-- GET /categories
-- GET /category-matrix
-
-routes/inventory.js
-- GET /api/inventory
-
-routes/inventoryIntegrityRoutes.js
-- GET /inventory/negatives
-- POST /inventory/fix
-- GET /inventory/row
-
-routes/itemImages.js
-- POST /api/update-item-image
-
-routes/itemsSetCategoryId.js
-- POST /api/items/set-category-id
-
-routes/itemsUpdateFields.js
-- POST /api/items/update-fields
-
-routes/reorderRoutes.js
-- GET /api/reorder
-
-routes/replenishment.js
-- GET /api/replenishment
-
-routes/replenishmentAiApi.js
-- POST /api/replenishment-ai/plan
-- POST /api/replenishment-ai/audit
-
-routes/replenishmentAiPage.js
-- GET /replenishment-ai/:merchantId?
-
-routes/squareCategories.js
-- GET /api/square-categories
-
-routes/squareOAuth.js
-- GET /connect-square
-- GET /square/oauth/callback
-
-routes/tasks.js
-- POST /tasks/sync-inventory
-- GET /tasks/full-nightly-sync
-
-Note: Some files in routes/indexPages.js expose "/" twice (app.js and indexPages.js both list GET /). Verify routing in code if collisions arise.
-
-# Cloud Run Jobs Notes
-
-This repository includes scripts and bin helpers for Cloud Run jobs. Key points:
-
-How to run a Cloud Run job (pattern derived from bin/run_cloud_job.sh):
-- Build the image:
-  gcloud builds submit --tag "$IMAGE"
-- Update the job definition:
-  gcloud run jobs update "$JOB" --image "$IMAGE" --region "$REGION"
-- Execute the job:
-  gcloud run jobs execute "$JOB" --region "$REGION"
-
-Secrets and credential mounting:
-- The project references GOOGLE_APPLICATION_CREDENTIALS and a secrets directory. In Cloud Run, service account keys should not be baked into images. Instead:
-  - Use Workload Identity or mount secrets via Secret Manager to environment variables or files.
-  - If your job expects GOOGLE_APPLICATION_CREDENTIALS to point to a JSON file path, mount the secret to that path in the Cloud Run job configuration.
-
-Common failure modes when running Cloud Run jobs:
-- Missing/incorrect GOOGLE_APPLICATION_CREDENTIALS:
-  - Symptom: Firestore or Google API permission errors.
-  - Fix: Ensure proper service account credentials are mounted or use Workload Identity.
-- Wrong GCLOUD_PROJECT / GOOGLE_CLOUD_PROJECT:
-  - Symptom: gcloud commands or Firestore access failing due to wrong project.
-  - Fix: Set GCLOUD_PROJECT and/or GOOGLE_CLOUD_PROJECT to the intended project id.
-- SQUARE_ACCESS_TOKEN / SQUARE_APP_SECRET not provided:
-  - Symptom: Square API calls fail or return 401.
-  - Fix: Provide Square credentials via Secret Manager and map them to env vars.
-- JOB definition mismatch:
-  - Symptom: gcloud run jobs execute fails because job was not updated with the correct image.
-  - Fix: Run the update job command before execute as shown above.
-
-# Troubleshooting
-
-Below are concrete problems you may encounter and steps to fix them based on repository structure.
-
-1) App crashes on startup due to missing SESSION_SECRET
-- Symptom: App throws an error when requiring session middleware.
-- Fix: Set SESSION_SECRET in your environment (export SESSION_SECRET="your-secret") or provide via ENV_FILE loaded by lib/loadEnv.js.
-
-2) Firestore permission or auth errors
-- Symptom: SDK throws permission denied or auth errors when connecting to Firestore.
-- Fix: Ensure GOOGLE_APPLICATION_CREDENTIALS is set to a valid service account JSON path accessible to the container or enable Workload Identity on Cloud Run. Confirm GCLOUD_PROJECT / GOOGLE_CLOUD_PROJECT match your Firestore project.
-
-3) Google OAuth login failing / callback mismatch
-- Symptom: Google OAuth returns "redirect_uri_mismatch".
-- Fix: Check GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_CALLBACK_URL. Ensure the callback URL configured in Google Cloud Console matches the value in your env.
-
-4) Square API 401/403 responses
-- Symptom: Requests to Square APIs fail with unauthorized.
-- Fix: Set SQUARE_ACCESS_TOKEN, SQUARE_APP_ID, and SQUARE_APP_SECRET appropriately. Ensure SQUARE_ENV matches the environment (sandbox vs production) and SQUARE_REDIRECT_URI values match OAuth app configuration.
-
-5) Sync scripts run but make no changes (dry-run behavior)
-- Symptom: Scripts report operations but do not persist.
-- Fix: Set DRY_RUN=false or unset it. Many scripts support DRY_RUN; check command output or set FIX to enable applying fixes.
-
-6) Jest tests failing due to JEST_WORKER_ID or port in use
-- Symptom: Tests fail when run in CI or locally, or nodemon consumes high memory.
-- Fix: Run tests in band using the npm script designed for CI:
-  npm run test:ci
-  or
-  JEST_WORKER_ID=1 npm test
-
-7) Docker image small or Node crash due to memory limits
-- Symptom: Node out-of-memory errors during dev or build.
-- Fix: Dev script already sets NODE_OPTIONS=--max-old-space-size=8192 in npm run dev. For production images, consider raising memory limits in Cloud Run or container runtime.
-
-8) Routes conflict or duplicate "/" route
-- Symptom: Multiple route handlers list GET /.
-- Fix: Inspect app.js and routes/indexPages.js to see which handler is mounted first. Adjust route mounting order if necessary.
-
-9) Cloud Run job fails with "database not found" when syncing Firestore
-- Symptom: bin/sync_firestore_db.sh style flows attempt to import/export databases by id and fail.
-- Fix: Confirm FIRESTORE_DATABASE_ID and related variables (SOURCE_DB, TARGET_DB) are set. Follow commands sequence: export, delete/create target DB, import.
-
-10) Environment variables not loaded in local dev
-- Symptom: Env variables present in .env but not applied.
-- Fix: Ensure lib/loadEnv.js is invoked at app startup or export ENV_FILE pointing to your .env. Alternatively export variables in your shell before running npm scripts.
-
-# Security Notes
-
-- Secrets handling: Do not hardcode secrets in the repository. Use Secret Manager or Cloud Run secret mounts for production SQUARE_* and GOOGLE_* credentials. The repository contains a secrets/ directory; treat it carefully and do not commit production secrets.
-- GOOGLE_APPLICATION_CREDENTIALS: If the app relies on a file path for Google credentials, mount the service account JSON in the container and set GOOGLE_APPLICATION_CREDENTIALS to the file path. Prefer Workload Identity for Cloud Run to eliminate the need for service account key files.
-- Session secrets: SESSION_SECRET must be strong and never stored in version control.
-- .env files and semicolons: When creating .env entries, if a value contains semicolons (;) or other special characters, wrap the value in quotes to ensure parsers (dotenv or custom loaders) interpret them correctly:
-  Example .env:
-  SESSION_SECRET="abc;123;secret"
-  GOOGLE_CALLBACK_URL="https://example.com/auth/google/callback"
-- Principle of least privilege: Grant service accounts only the permissions required (Firestore read/write, secret access, etc.).
-
-# Contributing / Maintenance
-
-- Tests: Run unit/integration tests with Jest:
-  npm test
-  npm run test:ci
-  For iterative development:
-  npm run test:watch
-
-- Regenerate README / automation:
-  The bin directory includes generate_readme_ai.js which appears to be a script present in the repository. If you maintain automated README generation, review that file to understand its inputs and usage. (I cannot assume behavior beyond the file's presence.)
-
-- Deploy scripts:
-  Use the shell scripts in bin/ to standardize deployment and job execution:
-  - bin/deploy_square_inventory_sync.sh — contains gcloud build and run deploy commands.
-  - bin/run_cloud_job.sh — contains build and job execution flow.
-  - bin/sync_firestore_db.sh — firestorer export/import flow.
-
-- Linting: No linter is present in dependencies list. If you introduce linting, add configuration and a package.json script (e.g., eslint) to standardize code quality.
-
-- Adding tests: Put tests under __tests__ using jest. Existing package.json has test scripts configured.
-
-- Scripts maintenance: Many operational scripts live in scripts/. Keep these idempotent and ensure DRY_RUN/CONFIRM_DELETE flags are respected to avoid accidental destructive operations.
-
-If something in this README is ambiguous based on repository contents (for example, exact behavior of generate_readme_ai.js or the content/structure of lib/loadEnv.js), inspect those files directly to confirm required arguments and side effects.
+This README documents the repository layout, the main workflows (local development, build, deploy, and running scheduled jobs), API surface (routes), environment configuration, troubleshooting tips, and contributor guidance.
 
 ---
 
-If you need runnable examples tailored to a specific environment (Cloud Run region, project id, image name, or a sample .env file populated with placeholders), provide the target environment variables and I can produce a ready-to-run command set or sample .env with placeholders.
+## Key Features
+
+- Inventory synchronization scripts and scheduled job entry points for:
+  - GTIN meta management and matrix builds
+  - Inventory syncs and nightly full syncs
+  - Replenishment recommendation workflows (including AI endpoints)
+  - Category and item syncing with Square
+- Web UI routes for dashboards, reports, and category management
+- Express-based API for updates (prices, item names, images, categories, and more)
+- Integration with Square API, Google APIs (Firestore, Drive/Sheets), OpenAI, and Algolia
+- Tools and scripts for copying images across merchants and rebuilding consolidated master inventory
+- Cloud Run / Cloud Build deployment helper scripts and job-run scripts
+
+---
+
+## Tech Stack
+
+- Node.js (base image: node:22-alpine)
+- Express for HTTP server and routing
+- EJS views for server-rendered UI
+- Firestore (Google Cloud) via @google-cloud/firestore
+- Square SDK (square)
+- Google APIs (googleapis)
+- OpenAI SDK (openai)
+- Algolia (algoliasearch)
+- Other utilities: axios, bcryptjs, multer, sharp, passport (Google + local), express-session
+- Testing: Jest and Supertest
+- Dev tooling: nodemon, cross-env
+
+---
+
+## Repository Layout
+
+Top-level entries (major folders and key files):
+
+- __tests__/ — Test suite for the project (Jest)
+- .github/ — GitHub Actions / workflows (not detailed here)
+- auth/ — Authentication logic (passport strategies, session handling)
+- bin/ — Deployment and automation shell scripts:
+  - deploy_square_inventory_sync.sh
+  - generate_readme_ai.js
+  - git_push_current.sh
+  - run_cloud_job.sh
+  - scan_repo.js
+  - sync_firestore_db.sh
+- lib/ — Shared libraries and helpers (notable files include lib/firestore.js and lib/loadEnv.js)
+- middleware/ — Express middleware
+- public/ — Static assets served by the app
+- routes/ — Express route handlers (API and page routes)
+- scripts/ — Long-running/one-off scripts for syncing and maintenance:
+  - syncInventory.js, rebuildMasterInventory.js, syncSheetToFirestore.js, etc.
+- secrets/ — Local secret files or placeholders (see Security Notes)
+- services/ — Service abstractions (Square, Firestore, etc.)
+- views/ — EJS templates for server-rendered pages
+- app.js — main Express application (registers routes)
+- server.js — server startup script (used by package.json start)
+- Dockerfile — Docker build instructions (base image: node:22-alpine)
+- package.json / package-lock.json — npm scripts and dependencies
+- README.md — this document
+- repo.summary.json, gpush.sh, jest.config.js, LICENSE — supporting files
+
+---
+
+## Getting Started (local dev)
+
+Prerequisites:
+- Node.js (image based on node:22-alpine — use Node 22.x locally for parity)
+- npm or yarn
+- Google Cloud SDK & gcloud (if interacting with Firestore or deploying)
+- Credentials for external services (Square, Google Cloud, OpenAI, Algolia) provided via environment variables or secrets files (see Configuration)
+
+Install and run locally:
+
+1. Install dependencies
+   - npm ci
+2. Start in development mode with file reloads and increased memory
+   - npm run dev
+   - This runs: NODE_OPTIONS=--max-old-space-size=8192 nodemon app.js
+3. To run the production server locally:
+   - npm start
+   - This runs: node server.js
+
+Run a specific sync script locally (examples):
+- npm run sync:inventory
+- npm run sync:gtin-meta
+- npm run rebuild:master-inventory
+- npm run sync:item-names-to-square
+
+Tests:
+- npm test
+- npm run test:watch
+- npm run test:ci
+
+Practical example: run the inventory sync and log output to file
+- npm run sync:inventory --silent 2>&1 | tee sync-inventory.log
+
+Note: many scripts accept environment variables to scope work (see Configuration).
+
+---
+
+## Configuration (Environment Variables)
+
+Below is the list of environment variables found in the repository and what they likely control (based only on names). Do not assume actual values — set these in your environment, .env files, or secret manager:
+
+- ALLOWED_EMAILS — comma-separated list of emails allowed to log in (auth gating)
+- APP_ENV — application environment name (e.g., development, production)
+- BATCH_SIZE — batch size used for batched operations (exports, writes)
+- CLEAN_DERIVED — flag to control cleaning of derived data
+- CLEAN_ONLY — flag for running only cleanup actions
+- CONFIRM_DELETE — safety flag to confirm destructive operations
+- COST_SHEET_ID — Google Sheets ID for cost data
+- COST_SHEET_RANGE — Sheet range to read cost data from
+- DRY_RUN — flag to run scripts without making changes
+- ENV_FILE — path to environment file
+- ENV_PATH — base path for environment files
+- FIRESTORE_DATABASE_ID — Firestore database identifier
+- FIX — general flag for applying fixes
+- GCLOUD_PROJECT — Google Cloud project id
+- GOOGLE_APPLICATION_CREDENTIALS — path to Google service account JSON file
+- GOOGLE_CALLBACK_URL — OAuth callback URL for Google auth
+- GOOGLE_CLIENT_ID — Google OAuth client ID
+- GOOGLE_CLIENT_SECRET — Google OAuth client secret
+- GOOGLE_CLOUD_PROJECT — another Google project variable
+- GTIN — single GTIN value used by scripts
+- GTINS — list of GTINs
+- GTIN_SAMPLE_LIMIT — limit when sampling GTINs
+- IDEA_COUNT — number of ideas or suggestions (used by AI features)
+- ITEM_LIMIT — maximum items to process in a job
+- ITEM_NAME_COLLECTION — Firestore collection name for item names
+- JEST_WORKER_ID — Jest internal worker id (for tests)
+- K_SERVICE — Cloud Run service name (in Cloud Run env)
+- LIMIT — generic limit for script operations
+- LIMIT_GTINS — limit for GTIN operations
+- LIMIT_PER_MERCHANT — per-merchant processing limit
+- MERCHANT_ID — merchant scope for operations
+- MERCHANT_IDS — list of merchant ids
+- MERCHANT_LABELS — labels/names for merchants
+- NODE_ENV — node environment (development/production)
+- NORMALIZE_INVENTORY — flag to normalize inventory data during sync
+- ONLY_UNSYNCED — process only unsynced records
+- OPENAI_API_KEY — API key for OpenAI integration
+- OPENAI_MODEL — model name used for AI calls
+- PORT — HTTP server port
+- READ_PAGE — pagination/read page indicator for scripts
+- REBUILD — flag to trigger a rebuild path
+- SAMPLE_LIMIT — sampling limit
+- SESSION_SECRET — secret used by express-session
+- SLEEP_MS — delay between batches or API calls
+- SQUARE_ACCESS_TOKEN — Square API access token
+- SQUARE_APP_ID — Square application id
+- SQUARE_APP_SECRET — Square application secret
+- SQUARE_ENV — Square environment (production/sandbox)
+- SQUARE_LOCATION_IDS — comma-separated Square location ids
+- SQUARE_REDIRECT_URI — OAuth redirect URI for Square
+- SQUARE_REDIRECT_URI_DEV — dev redirect URI for Square
+- SQUARE_REDIRECT_URI_PROD — prod redirect URI for Square
+- TARGET_GTIN — GTIN target for specific operations
+- TARGET_MERCHANT_ID — merchant id target for operations
+- USE_FIRESTORE_CACHE — toggle use of a Firestore cache
+- USE_SQUARE_API — toggle calls to Square API
+- WINDOW_DAYS — number of days window for time-based reports
+- WRITE_BATCH — batch size for writes
+
+If a variable's intended format or allowed values are unclear, use placeholders in your .env (for example: SQUARE_ACCESS_TOKEN="YOUR_SQUARE_TOKEN_HERE").
+
+---
+
+## Common Workflows
+
+Build and Docker
+- Build a container (using variables defined in bin scripts):
+  - gcloud builds submit --tag "${IMAGE}"
+  - Replace ${IMAGE} with a proper image tag (e.g., gcr.io/your-project/square-inventory-sync:latest)
+- Dockerfile uses base node:22-alpine (see Dockerfile). If you need to build locally:
+  - docker build -t square-inventory-sync:local .
+  - docker run -p 3000:3000 --env-file .env square-inventory-sync:local
+
+Deploy to Cloud Run
+- The repository provides a deployment script: bin/deploy_square_inventory_sync.sh
+- Typical gcloud commands used (from bin/deploy_square_inventory_sync.sh):
+  - gcloud builds submit --tag "${IMAGE}"
+  - gcloud run deploy "${SERVICE_NAME}" \
+  - gcloud run services update-traffic "${SERVICE_NAME}" \
+- Replace placeholders:
+  - ${IMAGE} — container image path
+  - ${SERVICE_NAME} — Cloud Run service name
+
+Run Cloud Run Jobs
+- Use bin/run_cloud_job.sh which issues:
+  - gcloud config set project "$PROJECT_ID"
+  - gcloud builds submit --tag "$IMAGE"
+  - gcloud run jobs update "$JOB" --region "$REGION"
+  - gcloud run jobs execute "$JOB" --region "$REGION"
+- Replace $JOB, $IMAGE, $PROJECT_ID and $REGION with your values.
+
+Firestore sync or copy
+- bin/sync_firestore_db.sh contains gcloud firestore export/import and database create/delete steps. Use with caution — these are destructive when targeting databases.
+
+Run scripts and tasks (examples)
+- Run a task endpoint locally (sync-inventory):
+  - POST /tasks/sync-inventory (route exists in routes/tasks.js)
+- Run nightly/full sync manually:
+  - node scripts/fullNightlySync.js
+  - or via npm script if mapped: npm run <script-name> (see package.json scripts)
+
+Common npm scripts
+- npm run dev — start app in dev mode with nodemon
+- npm start — start server with node server.js
+- npm run sync:inventory — run inventory sync script
+- npm run sync:gtin-meta — sync GTIN metadata to Firestore
+- npm run proper:item-names — run properCaseItemNames.js
+- npm test — run Jest test suite
+
+---
+
+## API / Routes (grouped by file)
+
+Below are the registered routes (method + path) grouped by file. Use these endpoints to interact with the HTTP API.
+
+- app.js
+  - GET /healthz
+  - GET /
+  - GET /debug/env
+
+- routes/apiUpdates.js
+  - POST /api/update-price
+  - POST /api/update-item-name
+
+- routes/auth.js
+  - GET /login
+  - POST /login
+  - GET /auth/google
+  - GET /auth/google/callback
+  - POST /logout
+
+- routes/categoriesList.js
+  - GET /api/categories
+
+- routes/categoriesRename.js
+  - POST /api/categories/rename
+
+- routes/categoryActions.js
+  - POST /api/categories/copy
+  - POST /api/categories/delete-all
+
+- routes/categoryMatrix.js
+  - GET /api/category-matrix
+
+- routes/categorySync.js
+  - POST /api/categories/sync-from-square
+
+- routes/copyItemInfo.js
+  - POST /api/copy-item-info
+
+- routes/deleteGtin.js
+  - POST /delete-item
+
+- routes/gtinDuplicates.js
+  - GET /api/gtin-duplicates
+
+- routes/gtinInventoryMatrix.js
+  - GET /api/duplicates-inventory-matrix
+
+- routes/gtinInventoryMatrixConsolidated.js
+  - GET /api/gtin-inventory-matrix
+
+- routes/gtinMatrix.js
+  - GET /api/gtin-matrix
+
+- routes/gtinMeta.js
+  - GET /api/gtin-meta
+  - PUT /api/gtin-meta/:gtin
+
+- routes/indexPages.js
+  - GET /
+  - GET /reorder
+  - GET /dashboard
+  - GET /dashboard/:merchantId
+  - GET /dashboard-gtin
+  - GET /duplicates-gtin
+  - GET /dashboard-vendor-costs
+  - GET /inventory-integrity
+  - GET /reports
+  - GET /categories
+  - GET /category-matrix
+
+- routes/inventory.js
+  - GET /api/inventory
+
+- routes/inventoryIntegrityRoutes.js
+  - GET /inventory/negatives
+  - POST /inventory/fix
+  - GET /inventory/row
+
+- routes/itemImages.js
+  - POST /api/update-item-image
+
+- routes/itemsSetCategoryId.js
+  - POST /api/items/set-category-id
+
+- routes/itemsUpdateFields.js
+  - POST /api/items/update-fields
+
+- routes/reorderRoutes.js
+  - GET /api/reorder
+
+- routes/replenishment.js
+  - GET /api/replenishment
+
+- routes/replenishmentAiApi.js
+  - POST /api/replenishment-ai/plan
+  - POST /api/replenishment-ai/audit
+
+- routes/replenishmentAiPage.js
+  - GET /replenishment-ai/:merchantId?
+
+- routes/squareCategories.js
+  - GET /api/square-categories
+
+- routes/squareOAuth.js
+  - GET /connect-square
+  - GET /square/oauth/callback
+
+- routes/tasks.js
+  - POST /tasks/sync-inventory
+  - GET /tasks/full-nightly-sync
+
+Example curl (update price):
+- curl -X POST -H "Content-Type: application/json" -d '{"itemId":"...","price":1234}' http://localhost:PORT/api/update-price
+
+Replace PORT with the configured PORT env var.
+
+---
+
+## Cloud Run Jobs Notes
+
+How to run:
+- Use bin/run_cloud_job.sh to build the image, update the job and execute it. The script pattern:
+  - gcloud config set project "$PROJECT_ID"
+  - gcloud builds submit --tag "$IMAGE"
+  - gcloud run jobs update "$JOB" --region "$REGION" ...
+  - gcloud run jobs execute "$JOB" --region "$REGION"
+
+Placeholders you need to supply:
+- $PROJECT_ID — Google Cloud project
+- $IMAGE — container image (eg. gcr.io/project/image:tag)
+- $JOB — Cloud Run job name
+- $REGION — Cloud region
+
+Secrets and credentials:
+- The repository includes a secrets/ directory and uses GOOGLE_APPLICATION_CREDENTIALS and GCLOUD_PROJECT / GOOGLE_CLOUD_PROJECT env vars. Common patterns:
+  - Set GOOGLE_APPLICATION_CREDENTIALS to point to a service account JSON file in the container or mounted via secret/volume.
+  - Configure Cloud Run service or job to inject secrets as environment variables or as mounted files. Check lib/loadEnv.js and lib/firestore.js (notable files) to see how credentials are expected to be loaded.
+
+Common Cloud Run Job failure modes (high-level; see Troubleshooting for concrete fixes):
+- Missing GOOGLE_APPLICATION_CREDENTIALS or incorrect path -> Firestore auth fails.
+- Incorrect PROJECT_ID or region -> gcloud run job update/execute fail.
+- Container exits immediately -> missing CMD/ENTRYPOINT or start script not configured.
+- API rate limits or auth failures for Square/OpenAI.
+
+---
+
+## Troubleshooting
+
+Below are concrete, repository-grounded issues and recommended fixes:
+
+1. Problem: Server does not start in production container.
+   - Fix: Ensure package.json start script exists ("node server.js") and Dockerfile sets a CMD/ENTRYPOINT that runs npm start or node server.js. Confirm PORT env var is provided to Cloud Run.
+
+2. Problem: Firestore permission/authentication errors.
+   - Fix: Set GOOGLE_APPLICATION_CREDENTIALS to a valid service account JSON and ensure GCLOUD_PROJECT / GOOGLE_CLOUD_PROJECT match your Google project. Verify the service account has Firestore permissions.
+
+3. Problem: Square API calls return 401/403.
+   - Fix: Verify SQUARE_ACCESS_TOKEN, SQUARE_APP_ID, SQUARE_APP_SECRET and SQUARE_ENV are set correctly. Ensure USE_SQUARE_API is enabled if required.
+
+4. Problem: Scripts run out of memory when processing large batches.
+   - Fix: The dev script sets NODE_OPTIONS=--max-old-space-size=8192. For production containers, increase memory limits or tune BATCH_SIZE/WRITE_BATCH env vars.
+
+5. Problem: Cloud Run job update/execute failing with project/region errors.
+   - Fix: Provide correct PROJECT_ID, REGION, IMAGE, and JOB variables when running bin/run_cloud_job.sh. Confirm gcloud is authenticated and configured.
+
+6. Problem: Changes not visible in Square after sync scripts run.
+   - Fix: Confirm USE_SQUARE_API is true and scripts are not running with DRY_RUN. Check logs for errors and confirm SQUARE_LOCATION_IDS / merchant scoping variables.
+
+7. Problem: Tests fail sporadically in CI due to Jest worker conflicts.
+   - Fix: Use npm run test:ci to run jest --ci --runInBand or ensure JEST_WORKER_ID is set appropriately. Running tests with --runInBand reduces parallelism-related flakiness.
+
+8. Problem: Environment variables with semicolons or special characters break parsing.
+   - Fix: Quote values in your .env or export commands. See Security Notes below for .env semicolon handling.
+
+9. Problem: Google Sheets / Drive integrations failing to read ranges.
+   - Fix: Ensure COST_SHEET_ID and COST_SHEET_RANGE are set correctly and the Google service account has permissions to access the sheet.
+
+10. Problem: Container image builds fail in Cloud Build due to missing build context or incorrect image tag.
+    - Fix: Ensure the build command gcloud builds submit --tag "$IMAGE" is run from the repository root and $IMAGE is a fully qualified image path (e.g., gcr.io/<project>/<image>:tag).
+
+11. Problem: Missing or misnamed secrets directory causes startup to fail.
+    - Fix: Verify the secrets/ directory contents and ensure lib/loadEnv.js or startup code is pointed at ENV_FILE/ENV_PATH to load secrets.
+
+---
+
+## Security Notes
+
+- Secrets handling
+  - The repo expects service credentials and API keys to be provided through environment variables (e.g., GOOGLE_APPLICATION_CREDENTIALS, SQUARE_ACCESS_TOKEN, OPENAI_API_KEY) or via a secrets/ directory. In production, prefer secret manager integrations (Cloud Secret Manager) or Cloud Run secret mounts rather than committing files to the repo.
+  - Do not commit service account JSON files or plain text secrets into version control.
+
+- .env quoting / semicolons
+  - When using .env files or shell exports, quote values that contain semicolons, spaces, or special characters. For example:
+    - SQUARE_ACCESS_TOKEN="sq0atp-abc;def;gh"
+  - Unquoted semicolons can be interpreted by shells as command separators, or by parsers as delimiters — this causes misconfigured env values.
+
+- Session and auth secrets
+  - SESSION_SECRET must be set to a secure, random value in production to protect session integrity.
+
+---
+
+## Contributing / Maintenance
+
+Regenerating documentation
+- The repo includes bin/generate_readme_ai.js which appears intended to generate or assist README generation. Use it if you need to re-generate this document (inspect the script before running).
+
+Testing
+- Run tests locally:
+  - npm test
+  - For watch mode: npm run test:watch
+  - For CI: npm run test:ci
+
+Code formatting and linting
+- No linter is listed in package.json devDependencies. If you add formatting tools, document them and add npm scripts.
+
+Scripts and code maintenance
+- Scripts in scripts/ are used for data migrations, syncs, and cleanups. When modifying scripts:
+  - Add dry-run options (DRY_RUN) when possible
+  - Use BATCH_SIZE and WRITE_BATCH environment variables to control throughput
+  - Add logging and idempotency checks for safer reruns
+
+Pull requests
+- Follow existing project conventions for tests and commit messages. Ensure new features add tests under __tests__/ when appropriate.
+
+Maintenance scripts / Automation
+- bin/deploy_square_inventory_sync.sh — deployment helper (wraps gcloud builds + run deploy commands)
+- bin/sync_firestore_db.sh — helper to export/import Firestore databases (use carefully; it contains database delete/create steps)
+- bin/run_cloud_job.sh — wrapper to build and run Cloud Run jobs
+
+---
+
+If anything in your environment or setup is unclear (for example, the exact runtime flags expected by specific scripts, or the structure expected within secrets/), inspect the notable files lib/loadEnv.js and lib/firestore.js to determine how environment variables and credentials are loaded, or ask the repository owner to provide example .env files and secret configuration.

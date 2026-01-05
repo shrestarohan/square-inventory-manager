@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log*
+.git
+coverage
+dist
+build
+secrets
+*.env
+repo.summary.json
+repo.cleanup.json
+cleanup.report.json
+CLEANUP.md
+
