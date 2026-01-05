@@ -1,6 +1,4 @@
 // app.js
-require("./lib/loadEnv"); // adjust relative path
-
 const path = require("path");
 const express = require('express');
 const session = require('express-session');

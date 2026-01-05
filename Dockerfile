@@ -1,6 +1,6 @@
 FROM node:22-alpine
 
-WORKDIR /app
+WORKDIR /usr/src/app
 
 # Install deps first (layer cache friendly)
 COPY package*.json ./
