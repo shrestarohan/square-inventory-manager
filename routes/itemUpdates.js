@@ -7,10 +7,11 @@ module.exports = function buildApiUpdatesRouter({
 }) {
   const router = express.Router();
 
-  // POST /api/update-price
-  router.post('/api/update-price', requireLogin, async (req, res) => {
+  // POST /api/update-item-price
+  router.post('/api/update-item-price', requireLogin, async (req, res) => {
     try {
       const { merchantId, variationId, price, currency } = req.body;
+      console.log(merchantId, variationId, price, currency);      
 
       if (!merchantId || !variationId || price == null) {
         return res.status(400).json({ error: 'merchantId, variationId, and price are required' });
@@ -22,6 +23,8 @@ module.exports = function buildApiUpdatesRouter({
       }
 
       const merchant = merchantDoc.data();
+      console.log(merchant);
+
       const client = createSquareClient(merchant.access_token, merchant.env || 'sandbox');
 
       const numericPrice = Number(price);

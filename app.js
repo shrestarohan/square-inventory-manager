@@ -1,4 +1,6 @@
 // app.js
+require("./lib/loadEnv");
+
 const path = require("path");
 const express = require('express');
 const session = require('express-session');
@@ -42,13 +44,26 @@ app.use(express.static(path.join(__dirname, 'public')));
 // -----------------------------
 // Sessions + Passport
 // -----------------------------
-app.use(session({
+/*app.use(session({
   secret: process.env.SESSION_SECRET || 'dev-session-secret-change-me',
   resave: false,
   saveUninitialized: false,
   proxy: true,
   cookie: { secure: 'auto', sameSite: 'lax' },
-}));
+}));*/
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "dev-secret-change-me",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: !!process.env.K_SERVICE, // true on Cloud Run behind https
+    },
+  })
+);
+
 
 // Passport init (strategies are configured in routes/auth.js)
 app.use(passport.initialize());
@@ -111,7 +126,7 @@ app.use(require('./routes/tasks')({
 // -----------------------------
 // APIs (shared across multiple views)
 // -----------------------------
-app.use(require('./routes/apiUpdates')({
+app.use(require('./routes/itemUpdates')({
   firestore,
   requireLogin,
   createSquareClient,
@@ -171,27 +186,20 @@ app.use(require('./routes/squareCategories')({
 }));
 
 app.use(require("./routes/categoryMatrix")({ firestore, requireLogin }));
-
 app.use(require("./routes/categoryActions")({ firestore, requireLogin }));
-
 app.use(require("./routes/categorySync")({ requireLogin }));
-
-const categoriesRenameRouter = require("./routes/categoriesRename");
-app.use(categoriesRenameRouter({ requireLogin, firestore }));
-
-const buildCategoriesListRouter = require("./routes/categoriesList");
-app.use(buildCategoriesListRouter({ firestore, requireLogin }));
-
-const buildItemsSetCategoryIdRouter = require("./routes/itemsSetCategoryId");
-app.use(buildItemsSetCategoryIdRouter({ firestore, requireLogin }));
-
+app.use(require("./routes/categoriesRename")({ requireLogin, firestore }));
+app.use(require("./routes/categoriesList")({ firestore, requireLogin }));
+app.use(require("./routes/itemsSetCategoryId")({ firestore, requireLogin }));
 app.use(require('./routes/itemsUpdateFields')({ firestore, requireLogin }));
-
 app.use(require('./routes/replenishment')({ firestore, requireLogin }));
 
 // AI Agent routes
 app.use(require("./routes/replenishmentAiPage")({ firestore, requireLogin }));
 app.use(require("./routes/replenishmentAiApi")({ firestore, requireLogin }));
+
+app.use(require("./routes/printPriceLabels")({ firestore, requireLogin }));
+app.use(require("./routes/productAiPage")({ firestore, requireLogin }));
 
 // -----------------------------
 // Pages (all res.render routes)
@@ -215,8 +223,13 @@ app.get('/debug/env', (req, res) => {
     hasGoogleClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
     googleCallbackUrl: process.env.GOOGLE_CALLBACK_URL || null,
     allowedEmails: (process.env.ALLOWED_EMAILS || '').split(';').filter(Boolean),
+    hasSquareAppId: !!process.env.SQUARE_APP_ID,
+    hasSquareSecret: !!process.env.SQUARE_APP_SECRET,
+    redirect: process.env.SQUARE_REDIRECT_URI || process.env.SQUARE_REDIRECT_URI_PROD || process.env.SQUARE_REDIRECT_URI_DEV || null,
+    squareEnv: process.env.SQUARE_ENV || null,
   });
 });
+
 
 // -----------------------------
 // Global error handler (helps Cloud Run debugging)

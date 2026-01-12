@@ -28,7 +28,8 @@
 const express = require("express");
 const router = express.Router();
 
-const { Client, Environment } = require("square/legacy");
+//const { Client, Environment } = require("square/legacy");
+const { createSquareClient } = require("../lib/square"); // your lib/square.js
 
 // ---------- helpers ----------
 function pick(obj, fields) {
@@ -51,10 +52,31 @@ function locIdForKey(locKey) {
   return Buffer.from(locKey, "utf8").toString("base64").replace(/=+$/g, "");
 }
 
+function digitsOnly(s) {
+  return String(s || "").replace(/\D+/g, "");
+}
+
+function normalizeUpcFromGtin(gtin) {
+  const d = digitsOnly(gtin);
+  if (!d) return null;
+
+  // Accept common retail identifiers
+  if (d.length === 12) return d;       // UPC-A
+  if (d.length === 13) return d;       // EAN-13
+
+  // GTIN-14 or other lengths: don't force into Square's upc field
+  return null;
+}
+
 async function resolveLocKeyToMeta(firestore, locKey) {
+  console.log("locKey="+locKey)
   const docId = locIdForKey(locKey);
+  console.log("docId="+docId)
   const byId = await firestore.collection("location_index").doc(docId).get();
+  console.log("byId="+byId)
   if (byId.exists) return byId.data();
+
+  console.log("Fallback query (should rarely happen)...");
 
   // Fallback query (should rarely happen)
   const snap = await firestore
@@ -75,13 +97,6 @@ async function getSquareAccessTokenForMerchant(firestore, merchantId) {
   const data = snap.data() || {};
   const token = (data.square_access_token || data.squareAccessToken || "").toString().trim();
   return token || null;
-}
-
-function buildSquareClient(accessToken) {
-  return new Client({
-    environment: process.env.SQUARE_ENV === "production" ? Environment.Production : Environment.Sandbox,
-    accessToken,
-  });
 }
 
 function computeMismatchAndSpread(pricesByLocation) {
@@ -144,6 +159,8 @@ async function createSquareItemAndVariation({
   const itemTempId = `#ITEM_${gtin}`;
   const varTempId = `#VAR_${gtin}`;
 
+  const upc = normalizeUpcFromGtin(gtin);
+
   const cents = toCents(price);
   const priceMoney = cents == null ? null : { amount: cents, currency };
 
@@ -163,6 +180,7 @@ async function createSquareItemAndVariation({
             itemVariationData: {
               name: "Regular",
               sku: sku || undefined,
+              upc: upc || undefined,   // ✅ THIS IS THE GTIN/UPC FIELD IN SQUARE
               pricingType: "FIXED_PRICING",
               priceMoney: safePriceMoney,
             },
@@ -205,6 +223,7 @@ async function updateSquareItemAndVariation({
   sku,
   price,
   currency,
+  gtin,
 }) {
   const catalogApi = squareClient.catalogApi;
 
@@ -228,6 +247,10 @@ async function updateSquareItemAndVariation({
 
   const varData = { ...(varObj.itemVariationData || {}) };
   if (sku) varData.sku = sku;
+
+  // ✅ ensure GTIN/UPC is present on the variation
+  const upc = normalizeUpcFromGtin(gtin);
+  if (upc) varData.upc = upc;
 
   if (price != null) {
     const cents = toCents(price);
@@ -294,6 +317,9 @@ module.exports = function buildCopyItemInfoRouter({ requireLogin, firestore }) {
           error: `toLocKey not found in location_index: ${toLocKey}`,
         });
       }
+
+      console.log("fromMeta=", fromMeta);
+      console.log("toMeta=", toMeta);
 
       const fromMerchantId = (fromMeta.merchant_id || "").toString().trim();
       const toMerchantId = (toMeta.merchant_id || "").toString().trim();
@@ -401,7 +427,7 @@ module.exports = function buildCopyItemInfoRouter({ requireLogin, firestore }) {
         if (!destToken) {
           squareResult = { ok: false, error: `No Square token for destination merchant ${toMerchantId}` };
         } else {
-          const squareClient = buildSquareClient(destToken);
+          const squareClient = createSquareClient(destToken);
 
           const existingItemId = (toData?.item_id || toData?.square_item_id || "").toString().trim();
           const existingVarId = (toData?.variation_id || toData?.square_variation_id || "").toString().trim();
@@ -415,6 +441,7 @@ module.exports = function buildCopyItemInfoRouter({ requireLogin, firestore }) {
               sku,
               price: srcPrice,
               currency: srcCurrency,
+              gtin,
             });
 
             await toInvRef.set(

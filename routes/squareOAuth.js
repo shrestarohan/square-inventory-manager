@@ -1,17 +1,72 @@
 // routes/squareOAuth.js
 const express = require('express');
+const crypto = require('crypto');
+
+async function loadMerchantAuth(firestore, merchantId) {
+  const snap = await firestore.collection('merchants').doc(merchantId).get();
+  const m = snap.exists ? (snap.data() || {}) : null;
+
+  const accessToken = (m?.access_token || '').toString().trim();
+  const refreshToken = (m?.refresh_token || '').toString().trim();
+  const env = (m?.env || 'production').toString();
+
+  return { m, accessToken: accessToken || null, refreshToken: refreshToken || null, env };
+}
+
+async function refreshSquareTokenIfPossible({
+  squareOAuthClient,
+  firestore,
+  merchantId,
+  refreshToken,
+}) {
+  if (!refreshToken) return null;
+
+  const clientId = process.env.SQUARE_APP_ID;
+  const clientSecret = process.env.SQUARE_APP_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error('SQUARE_APP_ID / SQUARE_APP_SECRET not configured for token refresh');
+  }
+
+  const { result } = await squareOAuthClient.oAuthApi.obtainToken({
+    clientId,
+    clientSecret,
+    grantType: 'refresh_token',
+    refreshToken,
+  });
+
+  const newAccessToken = (result?.accessToken || '').toString().trim();
+  const newRefreshToken = (result?.refreshToken || refreshToken || '').toString().trim();
+
+  if (!newAccessToken) return null;
+
+  await firestore.collection('merchants').doc(merchantId).set(
+    {
+      access_token: newAccessToken,
+      refresh_token: newRefreshToken,
+      refreshed_at: new Date().toISOString(),
+    },
+    { merge: true }
+  );
+
+  return { accessToken: newAccessToken, refreshToken: newRefreshToken };
+}
 
 module.exports = function buildSquareOAuthRouter({
   firestore,
   requireLogin,
   squareOAuthClient,
-  createSquareClient, // not required here but kept for parity
-  squareEnv,
+  createSquareClient, // should build a Square client with a specific access token + env
+  squareEnv,          // "production" or "sandbox"
 }) {
   const router = express.Router();
 
   const SQUARE_APP_ID = process.env.SQUARE_APP_ID;
   const SQUARE_APP_SECRET = process.env.SQUARE_APP_SECRET;
+
+  console.log("SQUARE_APP_ID?", !!process.env.SQUARE_APP_ID);
+  console.log("SQUARE_APP_SECRET?", !!process.env.SQUARE_APP_SECRET);
+  console.log("SQUARE_REDIRECT_URI?", !!process.env.SQUARE_REDIRECT_URI);
+  console.log("squareEnv:", squareEnv);
 
   const REDIRECT_URI =
     process.env.SQUARE_REDIRECT_URI ||
@@ -24,7 +79,13 @@ module.exports = function buildSquareOAuthRouter({
     if (!SQUARE_APP_ID) return res.status(500).send('SQUARE_APP_ID is not configured');
     if (!REDIRECT_URI) return res.status(500).send('SQUARE_REDIRECT_URI is not configured');
 
-    const state = 'csrf-or-user-id'; // you can improve later
+    console.log("SQUARE_APP_ID present?", !!process.env.SQUARE_APP_ID);
+
+    // ✅ CSRF protection: generate and store a one-time state
+    const state = crypto.randomBytes(24).toString('hex');
+    if (req.session) {
+      req.session.square_oauth_state = state;
+    }
 
     const scopes = [
       'MERCHANT_PROFILE_READ',
@@ -53,7 +114,7 @@ module.exports = function buildSquareOAuthRouter({
 
   // --- 2) OAuth callback – exchange code for tokens, store merchant in Firestore ---
   router.get('/square/oauth/callback', requireLogin, async (req, res) => {
-    const { code, error, error_description } = req.query;
+    const { code, error, error_description, state } = req.query;
 
     if (error) {
       console.error('Square returned error:', error, error_description);
@@ -65,6 +126,14 @@ module.exports = function buildSquareOAuthRouter({
       return res.status(500).send('SQUARE_APP_ID / SQUARE_APP_SECRET not configured');
     }
     if (!REDIRECT_URI) return res.status(500).send('SQUARE_REDIRECT_URI is not configured');
+
+    // ✅ Verify OAuth state (CSRF)
+    const expectedState = req.session ? req.session.square_oauth_state : null;
+    if (!expectedState || !state || String(state) !== String(expectedState)) {
+      return res.status(400).send('Invalid OAuth state. Please try connecting again.');
+    }
+    // one-time use
+    if (req.session) req.session.square_oauth_state = null;
 
     try {
       const { result } = await squareOAuthClient.oAuthApi.obtainToken({
@@ -117,6 +186,10 @@ module.exports = function buildSquareOAuthRouter({
       );
     }
   });
+
+  // (optional) export helpers if other routes need them
+  router.loadMerchantAuth = loadMerchantAuth;
+  router.refreshSquareTokenIfPossible = refreshSquareTokenIfPossible;
 
   return router;
 };

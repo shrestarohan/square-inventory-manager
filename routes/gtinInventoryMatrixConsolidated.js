@@ -54,6 +54,38 @@ function decodeCursor(s) {
   }
 }
 
+function pickImageUrlFromRow(row) {
+  const top =
+    row?.image_url ||
+    row?.imageUrl ||
+    row?.image ||
+    row?.photo_url ||
+    row?.photoUrl;
+
+  if (top) return String(top).trim();
+
+  const pb =
+    row?.pricesByLocation ||
+    row?.prices_by_location ||
+    row?.locations ||
+    {};
+
+  if (pb && typeof pb === "object") {
+    for (const k of Object.keys(pb)) {
+      const info = pb[k] || {};
+      const u =
+        info.image_url ||
+        info.imageUrl ||
+        info.image ||
+        info.photo_url ||
+        info.photoUrl;
+      if (u) return String(u).trim();
+    }
+  }
+
+  return "";
+}
+
 module.exports = function buildGtinInventoryMatrixConsolidatedRouter({
   requireLogin,
   firestore,
@@ -70,6 +102,23 @@ module.exports = function buildGtinInventoryMatrixConsolidatedRouter({
     
     
     try {
+      const sortKeyRaw = (req.query.sortKey || '').toString().trim();
+      const sortDir = (req.query.sortDir || 'asc').toString().toLowerCase() === 'desc' ? 'desc' : 'asc';
+
+      const ALLOWED_SORT_KEYS = new Set([
+        "__name__",       // gtin doc id
+        "item_name_lc",
+        "sku",
+        "category_name",
+        "price_spread",
+        "min_price",
+        "max_price",
+        "priced_location_count",
+        "updated_at",
+      ]);
+
+      const sortKey = ALLOWED_SORT_KEYS.has(sortKeyRaw) ? sortKeyRaw : "__name__";
+
       const pageSize = Math.min(Number(req.query.pageSize) || 50, 250);
       const cursor = req.query.cursor || null;
 
@@ -91,6 +140,15 @@ module.exports = function buildGtinInventoryMatrixConsolidatedRouter({
       const searchField = searchFieldRaw === "sku" ? "sku" : "name";
 
       const qRaw = (req.query.q || "").trim();
+
+      function parseFieldQuery(q) {
+        const m = q.match(/^([a-zA-Z_]+)\s*:\s*(.+)$/);
+        if (!m) return null;
+        return { field: m[1].toLowerCase(), value: m[2].trim() };
+      }
+
+      const fieldQ = parseFieldQuery(qRaw);
+
       const qLower = qRaw.toLowerCase();
       const hasQuery = !!qRaw;
 
@@ -130,57 +188,97 @@ module.exports = function buildGtinInventoryMatrixConsolidatedRouter({
       let keyField = "__name__";
 
       if (hasQuery) {
-        // 1) GTIN exact (fast)
-        if (isDigits && qNoSpace.length >= 8) {
-          const canonical = canonicalGtin(qNoSpace) || qNoSpace;
-          query = colRef
-            .orderBy("__name__")
-            .startAt(canonical)
-            .endAt(canonical)
-            .limit(pageSize);
-          cursorMode = "docId";
-          keyField = "__name__";
-        } else {
-          // 2) Token mode for things like 200ml, 750ml, 12pk, 1l
-          const token = makeSearchKey(qRaw); // "200 ml" -> "200ml"
-          const looksLikeSize =
-            /^\d+(\.\d+)?[a-z]+$/.test(token) && token.length <= 10;
+        // ✅ 0) Field query mode: category:, sku:, gtin:, name:
+        if (fieldQ && fieldQ.value) {
+          const field = fieldQ.field;
+          const value = fieldQ.value;
 
-          if (looksLikeSize) {
-            cursorMode = "token";
-            // For token mode, use a stable order so we can paginate if needed
-            // (requires composite index if mismatchOnly is used)
-            query = colRef.where("search_tokens", "array-contains", token);
-
-            if (mismatchOnly) query = query.where("has_mismatch", "==", true);
-
-            // stable pagination
-            query = query
-              .orderBy("price_spread", "desc")
-              .orderBy("__name__")
-              .limit(pageSize);
-            keyField = "price_spread";
-          } else {
-            // 3) Prefix mode (fast indexed)
+          if (field === "category" || field === "cat") {
             cursorMode = "prefix";
-            const matchKey = makeSearchKey(qRaw);
-            keyField = searchField === "sku" ? "sku_key" : "name_key";
+            keyField = "category_key";
+            const matchKey = makeSearchKey(value);
 
-            query = colRef.orderBy(keyField).orderBy("__name__");
+            query = colRef.orderBy("category_key").orderBy("__name__");
             if (mismatchOnly) query = query.where("has_mismatch", "==", true);
 
-            query = query
-              .startAt(matchKey)
-              .endAt(matchKey + "\uf8ff")
-              .limit(pageSize);
+            query = query.startAt(matchKey).endAt(matchKey + "\uf8ff").limit(pageSize);
+          } else if (field === "sku") {
+            cursorMode = "prefix";
+            keyField = "sku_key";
+            const matchKey = makeSearchKey(value);
+
+            query = colRef.orderBy("sku_key").orderBy("__name__");
+            if (mismatchOnly) query = query.where("has_mismatch", "==", true);
+
+            query = query.startAt(matchKey).endAt(matchKey + "\uf8ff").limit(pageSize);
+          } else if (field === "name" || field === "item") {
+            cursorMode = "prefix";
+            keyField = "name_key";
+            const matchKey = makeSearchKey(value);
+
+            query = colRef.orderBy("name_key").orderBy("__name__");
+            if (mismatchOnly) query = query.where("has_mismatch", "==", true);
+
+            query = query.startAt(matchKey).endAt(matchKey + "\uf8ff").limit(pageSize);
+          } else if (field === "gtin") {
+            const digits = value.toLowerCase().replace(/\s+/g, "");
+            const canonical = canonicalGtin(digits) || digits;
+
+            query = colRef.orderBy("__name__").startAt(canonical).endAt(canonical).limit(pageSize);
+            cursorMode = "docId";
+            keyField = "__name__";
+          }
+        }
+
+        // ✅ 1) Fallback to your existing normal search (MOST IMPORTANT FIX)
+        if (!query) {
+          // 1) GTIN exact (fast)
+          if (isDigits && qNoSpace.length >= 8) {
+            const canonical = canonicalGtin(qNoSpace) || qNoSpace;
+            query = colRef.orderBy("__name__").startAt(canonical).endAt(canonical).limit(pageSize);
+            cursorMode = "docId";
+            keyField = "__name__";
+          } else {
+            // 2) Token mode (200ml, 750ml, 12pk, 1l)
+            const token = makeSearchKey(qRaw);
+            const looksLikeSize = /^\d+(\.\d+)?[a-z]+$/.test(token) && token.length <= 10;
+
+            if (looksLikeSize) {
+              cursorMode = "token";
+              query = colRef.where("search_tokens", "array-contains", token);
+
+              if (mismatchOnly) query = query.where("has_mismatch", "==", true);
+
+              query = query.orderBy("price_spread", "desc").orderBy("__name__").limit(pageSize);
+              keyField = "price_spread";
+            } else {
+              // 3) Prefix mode (fast indexed)
+              cursorMode = "prefix";
+              const matchKey = makeSearchKey(qRaw);
+              keyField = searchField === "sku" ? "sku_key" : "name_key";
+
+              query = colRef.orderBy(keyField).orderBy("__name__");
+              if (mismatchOnly) query = query.where("has_mismatch", "==", true);
+
+              query = query.startAt(matchKey).endAt(matchKey + "\uf8ff").limit(pageSize);
+            }
           }
         }
       } else {
-        // default list
-        query = colRef.orderBy("__name__").limit(pageSize);
+        // default list (no search)
+        query = colRef;
         if (mismatchOnly) query = query.where("has_mismatch", "==", true);
-        cursorMode = "docId";
-        keyField = "__name__";
+
+        if (sortKey === "__name__") {
+          query = query.orderBy("__name__", sortDir).limit(pageSize);
+          cursorMode = "docId";
+          keyField = "__name__";
+        } else {
+          // ✅ key must be LAST (so we add __name__ after sortKey)
+          query = query.orderBy(sortKey, sortDir).orderBy("__name__", "asc").limit(pageSize);
+          cursorMode = "prefix"; // composite cursor: (k,id)
+          keyField = sortKey;
+        }
       }
 
       // -------------------------
@@ -193,7 +291,7 @@ module.exports = function buildGtinInventoryMatrixConsolidatedRouter({
         } else if (cursorMode === "prefix") {
           // base64 JSON: { k: <keyFieldValue>, id: <docId> }
           const c = decodeCursor(cursor);
-          if (c && typeof c.k === "string" && typeof c.id === "string") {
+          if (c && (typeof c.k === "string" || typeof c.k === "number") && typeof c.id === "string") {
             query = query.startAfter(c.k, c.id);
           }
         } else if (cursorMode === "token") {
@@ -271,8 +369,8 @@ module.exports = function buildGtinInventoryMatrixConsolidatedRouter({
           if (cursorMode === "docId") {
             workingQuery = query.startAfter(lastScannedDoc);
           } else if (cursorMode === "prefix") {
-            const lastKey = (lastScannedDoc.data()?.[keyField] || "").toString();
-            workingQuery = query.startAfter(lastKey, lastScannedDoc.id);
+            const lastKey = lastScannedDoc.data()?.[keyField];
+            workingQuery = query.startAfter(lastKey ?? null, lastScannedDoc.id);
           } else if (cursorMode === "token") {
             const lastSpread = Number(lastScannedDoc.data()?.price_spread ?? 0);
             workingQuery = query.startAfter(lastSpread, lastScannedDoc.id);
@@ -295,15 +393,119 @@ module.exports = function buildGtinInventoryMatrixConsolidatedRouter({
         if (cursorMode === "docId") {
           nextCursor = lastScannedDoc.id;
         } else if (cursorMode === "prefix") {
-          const lastKey = (lastScannedDoc.data()?.[keyField] || "").toString();
-          nextCursor = encodeCursor({ k: lastKey, id: lastScannedDoc.id });
+          const lastKey = lastScannedDoc.data()?.[keyField];
+          nextCursor = encodeCursor({ k: lastKey ?? null, id: lastScannedDoc.id });
         } else if (cursorMode === "token") {
           const lastSpread = Number(lastScannedDoc.data()?.price_spread ?? 0);
           nextCursor = encodeCursor({ s: lastSpread, id: lastScannedDoc.id });
         }
       }
+      
+      rows = rows.map(r => ({
+        ...r,
+        image_url: pickImageUrlFromRow(r),
+      }));
 
-      return res.json({ rows, locations, locationsMeta, nextCursor });
+      // -------------------------
+      // Total count (for UI counter)
+      // -------------------------
+      let totalCount = null;
+
+      try {
+        // We only compute count when searching OR when filters are active,
+        // otherwise it can be expensive for a full collection.
+        const shouldCount =
+          !!qRaw || mismatchOnly || missingOnly;
+
+        if (shouldCount) {
+          let countQuery = colRef;
+
+          // reuse the SAME filters as the main query
+          if (mismatchOnly) countQuery = countQuery.where("has_mismatch", "==", true);
+
+          // If missingOnly is used, there is no clean Firestore count (it’s an in-memory filter),
+          // so we can’t do a true totalCount without scanning everything.
+          // We'll set totalCount to the number returned on this page for missingOnly,
+          // OR you can show ">= pageSize" style UI.
+          if (missingOnly) {
+            totalCount = rows.length; // best-effort
+          } else {
+            // Search modes
+            if (hasQuery) {
+              if (fieldQ && fieldQ.value) {
+                const field = fieldQ.field;
+                const value = fieldQ.value;
+
+                if (field === "category" || field === "cat") {
+                  const matchKey = makeSearchKey(value);
+                  // category_key prefix range
+                  countQuery = countQuery
+                    .orderBy("category_key")
+                    .startAt(matchKey)
+                    .endAt(matchKey + "\uf8ff");
+                } else if (field === "sku") {
+                  const matchKey = makeSearchKey(value);
+                  countQuery = countQuery
+                    .orderBy("sku_key")
+                    .startAt(matchKey)
+                    .endAt(matchKey + "\uf8ff");
+                } else if (field === "name" || field === "item") {
+                  const matchKey = makeSearchKey(value);
+                  countQuery = countQuery
+                    .orderBy("name_key")
+                    .startAt(matchKey)
+                    .endAt(matchKey + "\uf8ff");
+                } else if (field === "gtin") {
+                  const digits = value.toLowerCase().replace(/\s+/g, "");
+                  const canonical = canonicalGtin(digits) || digits;
+                  countQuery = countQuery
+                    .orderBy("__name__")
+                    .startAt(canonical)
+                    .endAt(canonical);
+                } else {
+                  // unknown field => fall back to normal qRaw behavior below
+                  throw new Error("unknown-field");
+                }
+              } else {
+                // Normal hasQuery behavior (same logic as your main query)
+                if (isDigits && qNoSpace.length >= 8) {
+                  const canonical = canonicalGtin(qNoSpace) || qNoSpace;
+                  countQuery = countQuery
+                    .orderBy("__name__")
+                    .startAt(canonical)
+                    .endAt(canonical);
+                } else {
+                  const token = makeSearchKey(qRaw);
+                  const looksLikeSize =
+                    /^\d+(\.\d+)?[a-z]+$/.test(token) && token.length <= 10;
+
+                  if (looksLikeSize) {
+                    // array-contains token count
+                    countQuery = countQuery.where("search_tokens", "array-contains", token);
+                  } else {
+                    // prefix mode
+                    const matchKey = makeSearchKey(qRaw);
+                    const kf = searchField === "sku" ? "sku_key" : "name_key";
+                    countQuery = countQuery
+                      .orderBy(kf)
+                      .startAt(matchKey)
+                      .endAt(matchKey + "\uf8ff");
+                  }
+                }
+              }
+            }
+
+            // ✅ Firestore count aggregation
+            const agg = await countQuery.count().get();
+            totalCount = agg.data().count;
+          }
+        }
+      } catch (e) {
+        // If count fails (missing index, etc), keep UI working
+        totalCount = null;
+      }
+
+      return res.json({ rows, locations, locationsMeta, nextCursor, totalCount });
     } catch (err) {
       console.error("Error in /api/gtin-inventory-matrix:", err);
       return res.status(500).json({ error: err.message || "Internal error" });

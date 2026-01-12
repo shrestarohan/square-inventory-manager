@@ -23,9 +23,30 @@
         activePage: 'dashboard-gtin',
       }) %>
 
-  <p class="hint">
-    Rows highlighted have different prices across locations.
-  </p>
+  <div id="gtin-sticky-top">
+
+    <p class="hint">
+      Rows highlighted have different prices across locations.
+    </p>
+
+    <div style="display:flex;gap:10px;align-items:center;margin:10px 0 14px 0;">
+
+      <label style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="selectAllLabels" />
+        Select all on page
+      </label>
+
+      <button id="btn-print-labels" class="btn" type="button">🏷️ Print Labels</button>
+
+      <label style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+        Price from store:
+        <select id="labelPriceLoc">
+          <option value="">(first available price)</option>
+          <!-- locations injected after load -->
+        </select>
+      </label>
+    </div>
+  </div>
 
   <!-- ✅ Server-side filter UI: mismatch + missing filters live in header.ejs -->
   <!-- Required IDs in header.ejs:
@@ -35,18 +56,21 @@
   <table id="inventory-table">
     <thead>
       <tr id="header-row">
+        <th style="width:44px;">Label</th>
         <th>Delete</th>
+        <th>Image</th>
         <th class="sortable" data-key="gtin" data-type="string">GTIN</th>
         <th class="sortable" data-key="sku" data-type="string">SKU</th>
         <th class="sortable" data-key="category_name" data-type="string">Category</th>
         <th class="sortable" data-key="item_name" data-type="string">Item</th>
-        <!-- Location price columns injected by JS -->
+        <!-- Location columns injected by JS -->
       </tr>
     </thead>
     <tbody id="inventory-body"></tbody>
   </table>
 
   <div class="pagination">
+    <span id="results-count" style="margin-right:10px;opacity:.85;"></span>
     <span id="page-info"></span>
     <span>
       Rows per page:
@@ -64,6 +88,15 @@
   <%- include('partials/footer') %>
 
   <script>
+    const btnPrintLabels = document.getElementById('btn-print-labels');
+    const selectAllLabels = document.getElementById('selectAllLabels');
+    const labelPriceLoc = document.getElementById('labelPriceLoc');
+    const resultsCountEl = document.getElementById('results-count');
+
+    let lastTotalCount = null;          // number | null
+    let totalCountIsEstimated = false;  // boolean
+
+
     // ---------- header controls ----------
     const merchantSelect = document.getElementById('merchantSelect');
     if (merchantSelect) merchantSelect.addEventListener('change', () => {
@@ -108,6 +141,25 @@
         if (topLoaderBar) topLoaderBar.style.width = '0%';
       }, 180);
     }
+
+    function applyStickyOffsets() {
+      const topBar = document.querySelector('.top-bar');      // your main header
+      const controls = document.getElementById('gtin-sticky-top');
+
+      const topBarH = topBar ? Math.ceil(topBar.getBoundingClientRect().height) : 0;
+
+      // controls sit under topBar
+      document.documentElement.style.setProperty('--gtin-controls-top', `${topBarH}px`);
+
+      // table head sits under (topBar + controls)
+      const controlsH = controls ? Math.ceil(controls.getBoundingClientRect().height) : 0;
+      document.documentElement.style.setProperty('--gtin-table-head-top', `${topBarH + controlsH}px`);
+    }
+
+    // recalc on layout changes
+    window.addEventListener('resize', applyStickyOffsets);
+    window.addEventListener('load', applyStickyOffsets);
+    setTimeout(applyStickyOffsets, 0);
 
     // table/paging
     const headerRow = document.getElementById('header-row');
@@ -154,6 +206,20 @@
     // backend normalizes "200 ml" -> "200ml"
     let currentQueryRaw = '';
 
+    function getUrlParam(name) {
+      const u = new URL(window.location.href);
+      return (u.searchParams.get(name) || '').toString();
+    }
+
+    function setUrlParam(name, value) {
+      const u = new URL(window.location.href);
+      if (value && value.trim()) u.searchParams.set(name, value.trim());
+      else u.searchParams.delete(name);
+
+      // don’t trigger full reload; just update URL
+      window.history.replaceState({}, '', u.toString());
+    }
+
     function resetPagingAndLoad() {
       pages = [];
       cursors = [null];
@@ -194,15 +260,18 @@
       for (let i = 0; i < 10; i++) {
         const tr = document.createElement('tr');
         tr.innerHTML =
-          `<td colspan="${5 + (locationKeys?.length || 0)}" ` +
-          `style="padding:14px;opacity:.35;">&nbsp;</td>`;
+          `<td colspan="${7 + (locationKeys?.length || 0)}" style="padding:14px;opacity:.35;">&nbsp;</td>`;
         tbody.appendChild(tr);
       }
     }
 
     function ensureHeader(locKeys) {
       if (headerBuilt) return;
-      locationKeys = Array.isArray(locKeys) ? locKeys : [];
+
+      // Freeze location column order once, forever
+      const keys = Array.isArray(locKeys) ? locKeys.slice() : [];
+      locationKeys = keys; // set once
+
       locationKeys.forEach(locKey => {
         const th = document.createElement('th');
         th.textContent = locLabel(locKey) + ' (Price)';
@@ -237,7 +306,10 @@
 
 
     function getHeaderCells() {
-      return Array.from(document.querySelectorAll('#inventory-table thead th.sortable'));
+      // Only the fixed sortable headers (not injected location headers)
+      return Array.from(
+        document.querySelectorAll('#inventory-table thead th.sortable[data-key]')
+      );
     }
 
     function clearSortIndicators() {
@@ -261,10 +333,26 @@
         }
       });
 
-      renderTable();
+      resetPagingAndLoad();
+    }
+
+    function ensureLabelPriceLocOptions(locKeys) {
+      const keys = Array.isArray(locKeys) ? locKeys : [];
+      if (!labelPriceLoc) return;
+      if (labelPriceLoc.dataset.built === '1') return;
+
+      keys.forEach(k => {
+        const opt = document.createElement('option');
+        opt.value = k;                 // locKey
+        opt.textContent = locLabel(k); // friendly label
+        labelPriceLoc.appendChild(opt);
+      });
+
+      labelPriceLoc.dataset.built = '1';
     }
 
     async function fetchPage(pageIndexToLoad) {
+
       const cursor = cursors[pageIndexToLoad] || null;
 
       const params = new URLSearchParams();
@@ -282,6 +370,11 @@
         if (missingRequireBase) params.set('missingRequirePresentIn', missingRequireBase);
       }
 
+      if (currentSort.key) {
+        params.set('sortKey', currentSort.key);
+        params.set('sortDir', currentSort.direction || 'asc');
+      }
+
       const url = '/api/gtin-inventory-matrix?' + params.toString();
 
       if (inflight) inflight.abort();
@@ -296,16 +389,28 @@
 
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      
+
+      lastTotalCount = (typeof data.totalCount === 'number') ? data.totalCount : null;
+      totalCountIsEstimated = !!data.totalCountIsEstimated;
+      if (resultsCountEl) {
+        if (lastTotalCount == null) {
+          resultsCountEl.textContent = '';
+        } else {
+          resultsCountEl.textContent = `Results: ${lastTotalCount}`;
+        }
+      }
+
       if (data.locationsMeta) locationsMeta = data.locationsMeta || {};
       if (!headerBuilt && data.locations) ensureHeader(data.locations);
       if (data.locations) ensureMissingTargets(data.locations);
+      if (data.locations) ensureLabelPriceLocOptions(data.locations);
 
       const rows = (data.rows || []).map(r => ({
         gtin: r.gtin || '',
         item_name: r.item_name || '',
         category_name: r.category_name || '',
         sku: r.sku || '',
+        image_url: r.image_url || '',
         pricesByLocation: r.pricesByLocation || {},
       }));
 
@@ -513,7 +618,7 @@
       }
 
       if (!currentRows.length) {
-        tbody.innerHTML = `<tr><td colspan="${5 + locationKeys.length}">No GTIN rows found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${7 + locationKeys.length}">No GTIN rows found.</td></tr>`;
         const filtersLabel = [
           mismatchOnly ? 'Mismatch only' : 'All',
           missingOnly ? `Missing in ${missingTarget ? locLabel(missingTarget) : '(select store)'}` : null
@@ -528,6 +633,15 @@
         const tr = document.createElement('tr');
         if (isMismatchRow(r)) tr.classList.add('mismatch-row');
 
+        // --- label checkbox ---
+        const tdPick = document.createElement('td');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'label-pick';
+        cb.dataset.gtin = r.gtin || '';
+        tdPick.appendChild(cb);
+        tr.appendChild(tdPick);
+
         // --- delete button ---
         const tdDel = document.createElement('td');
         const delBtn = document.createElement('button');
@@ -538,6 +652,45 @@
         delBtn.addEventListener('click', handleDeleteGtin);
         tdDel.appendChild(delBtn);
         tr.appendChild(tdDel);
+
+        // --- image ---
+        const tdImg = document.createElement('td');
+
+        const img = document.createElement('img');
+        img.alt = r.item_name || r.gtin || 'item';
+        img.loading = 'lazy';
+        img.style.width = '44px';
+        img.style.height = '44px';
+        img.style.objectFit = 'cover';
+        img.style.borderRadius = '8px';
+        img.style.border = '1px solid rgba(0,0,0,0.12)';
+
+        const PLACEHOLDER =
+          'data:image/svg+xml;utf8,' +
+          encodeURIComponent(`
+            <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120">
+              <rect width="100%" height="100%" rx="14" ry="14" fill="#f3f4f6"/>
+              <path d="M28 78l18-18 14 14 12-12 20 20" fill="none" stroke="#9ca3af" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="45" cy="44" r="8" fill="#9ca3af"/>
+              <text x="50%" y="92%" text-anchor="middle" font-family="Arial" font-size="14" fill="#6b7280">No Image</text>
+            </svg>
+          `);
+
+        const imgUrl = (r.image_url || '').toString().trim();
+
+        // Use API image if present, otherwise placeholder
+        img.src = imgUrl ? imgUrl : PLACEHOLDER;
+
+        // If the API image fails, fall back to placeholder
+        img.onerror = () => {
+          // Avoid infinite loop if placeholder fails (rare)
+          if (img.src === PLACEHOLDER) return;
+          img.src = PLACEHOLDER;
+        };
+
+        tdImg.appendChild(img);
+        tr.appendChild(tdImg);
+
 
         const tdGtin = document.createElement('td');
         tdGtin.textContent = r.gtin;
@@ -620,15 +773,44 @@
         missingOnly ? `Missing in ${missingTarget ? locLabel(missingTarget) : '(select store)'}` : null
       ].filter(Boolean).join(' — ');
 
+      const showing = currentRows.length;
+
+      if (resultsCountEl) {
+        if (typeof lastTotalCount === 'number') {
+          resultsCountEl.textContent = `Showing ${showing} of ${lastTotalCount}`;
+        } else {
+          resultsCountEl.textContent = totalCountIsEstimated
+            ? `Showing ${showing} (total unknown for this filter)`
+            : `Showing ${showing}`;
+        }
+      }
+
       pageInfo.textContent = `Page ${currentPageIndex + 1} (${filtersLabel || 'All'} — rows: ${currentRows.length})`;
       prevBtn.disabled = currentPageIndex <= 0;
       nextBtn.disabled = !hasNext;
     }
 
-    // sorting
-    getHeaderCells().forEach(th => {
-      th.addEventListener('click', () => sortBy(th.dataset.key, th.dataset.type || 'string'));
-    });
+    // sorting (bind once on fixed columns only)
+    let sortBound = false;
+
+    function bindSortHandlersOnce() {
+      if (sortBound) return;
+      sortBound = true;
+
+      // Only the first fixed columns (GTIN, SKU, Category, Item) are sortable.
+      // Location columns are injected later and should NOT be sortable.
+      const sortable = document.querySelectorAll(
+        '#inventory-table thead th.sortable[data-key]'
+      );
+
+      sortable.forEach(th => {
+        th.addEventListener('click', () => {
+          sortBy(th.dataset.key, th.dataset.type || 'string');
+        });
+      });
+    }
+
+    bindSortHandlersOnce();
 
     // search
     let searchDebounce = null;
@@ -636,7 +818,12 @@
       searchInput.addEventListener('input', () => {
         clearTimeout(searchDebounce);
         searchDebounce = setTimeout(() => {
-          currentQueryRaw = (searchInput.value || '').trim().toLowerCase();
+          const raw = (searchInput.value || '').trim();
+          currentQueryRaw = raw.toLowerCase();
+
+          // ✅ keep search across refresh
+          setUrlParam('q', raw);
+
           resetPagingAndLoad();
         }, 250);
       });
@@ -678,7 +865,7 @@
       input.classList.remove('price-error');
 
       try {
-        const res = await fetch('/api/update-price', {
+        const res = await fetch('/api/update-item-price', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ merchantId, variationId, price: numericPrice, currency }),
@@ -732,14 +919,55 @@
       }
     }
 
+    function getSelectedGtinsOnPage() {
+      return Array.from(document.querySelectorAll('.label-pick:checked'))
+        .map(x => (x.dataset.gtin || '').trim())
+        .filter(Boolean);
+    }
+
+    if (selectAllLabels) {
+      selectAllLabels.addEventListener('change', () => {
+        const checked = !!selectAllLabels.checked;
+        document.querySelectorAll('.label-pick').forEach(cb => cb.checked = checked);
+      });
+    }
+
+    if (btnPrintLabels) {
+      btnPrintLabels.addEventListener('click', () => {
+        const gtins = getSelectedGtinsOnPage();
+
+        if (!gtins.length) {
+          alert('Select at least one row to print labels.');
+          return;
+        }
+
+        const params = new URLSearchParams();
+        params.set('gtins', gtins.join(','));
+
+        const locKey = (labelPriceLoc?.value || '').trim();
+        if (locKey) params.set('locKey', locKey);
+
+        window.open('/print/price-labels?' + params.toString(), '_blank', 'noopener,noreferrer');
+      });
+    }
+
     // initial load (global consolidated view)
     (async () => {
       try {
+        // restore search from URL on refresh
+        const qFromUrl = getUrlParam('q').trim();
+        if (qFromUrl) {
+          currentQueryRaw = qFromUrl.toLowerCase();
+          if (searchInput) searchInput.value = qFromUrl; // show user what’s applied
+        }
+
         await loadPage(0);
+        applyStickyOffsets();
+
       } catch (e) {
         console.error(e);
         stopLoading();
-        tbody.innerHTML = `<tr><td colspan="4">Failed to load. Check server logs.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7">Failed to load. Check server logs.</td></tr>`;
       }
     })();
   </script>

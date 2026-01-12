@@ -349,7 +349,7 @@ tbody tr:hover{ background-color: #f0f7ff; }
 .mismatch-row input{ background-color: rgba(220, 38, 38, 0.18); }
 
 /* missing-data */
-tr.missing-row{ outline: 2px solid rgba(255, 92, 92, .35); }
+tr.missing-row{ outline: 1px solid rgba(255, 92, 92, .35); }
 tr.missing-row td{ background: rgba(255, 92, 92, .06); }
 
 .missing-cell input{
@@ -483,3 +483,23 @@ td.is-clickable { cursor: pointer; }
 td.is-editing { background: #fffbe6; }
 td.is-saving { opacity: 0.7; pointer-events: none; }
 td.is-saved { outline: 2px solid #b7eb8f; }
+
+/* Make sure sticky can paint above rows */
+#inventory-table thead { position: sticky; z-index: 50; } /* helps on some browsers */
+
+/* Sticky table header cells */
+#inventory-table thead th {
+  position: sticky;
+  top: var(--gtin-table-head-top, 0px); /* set by JS */
+  z-index: 60;
+}
+
+/* Sticky control bar right above table (your #gtin-sticky-top) */
+#gtin-sticky-top{
+  position: sticky;
+  top: var(--gtin-controls-top, 0px);  /* set by JS */
+  z-index: 80;
+  background: #fff;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  padding-top: 8px;
+}

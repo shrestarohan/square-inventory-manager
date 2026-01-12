@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Price Labels</title>
+  <style>
+    @page { margin: 0.25in; }
+
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0.25in;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .toolbar {
+      display:flex; gap:10px; align-items:center; margin-bottom:10px;
+    }
+    .btn {
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    :root {
+      --label-w: 3.5in;
+      --label-h: 1.125in;
+      --gap: 0.06in;
+
+      --price-size: 45px;
+
+      /* ✅ 2x sizes */
+      --img-size: 1.00in;  /* was ~0.62in */
+      --qr-size:  0.50in;  /* was ~0.52in */
+      --pad: 0.04in;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(var(--label-w), var(--label-w)));
+      gap: var(--gap);
+      align-items: start;
+    }
+
+    .label {
+      width: var(--label-w);
+      height: var(--label-h);
+      border: 1px solid #111;
+      border-radius: 0.10in;
+      box-sizing: border-box;
+      padding: var(--pad);
+
+      /* image | middle | qr */
+      display: grid;
+      grid-template-columns: var(--img-size) 1fr var(--qr-size);
+      gap: 0.04in;
+      align-items: stretch;
+
+      overflow: hidden;
+      page-break-inside: avoid;
+    }
+
+    /* colorful backgrounds by mismatch spread */
+    .label[data-level="high"] { background: linear-gradient(135deg, #ffe1e1, #fff3bf); }
+    .label[data-level="med"]  { background: linear-gradient(135deg, #e7f0ff, #eafff1); }
+    .label[data-level="low"]  { background: linear-gradient(135deg, #f4f4f4, #ffffff); }
+
+    .img {
+      width: var(--img-size);
+      height: var(--img-size);
+      border-radius: 0.08in;
+      border: 1px solid rgba(0,0,0,0.15);
+      object-fit: cover;
+      background: #fff;
+      display: block;
+      align-self: center;
+      justify-self: start;
+    }
+
+    /* Middle column: tighter */
+    .mid {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto auto auto auto; /* name, price, gtin, barcode */
+      gap: 1px;
+      align-content: center;
+    }
+
+    .name {
+      font-weight: 900;
+      font-size: 9px;
+      line-height: 1.05;
+      margin: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .price {
+      font-weight: 900;
+      font-size: var(--price-size);
+      line-height: 0.95;
+      margin: 0;
+      letter-spacing: -0.5px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .gtin {
+      font-size: 8px;
+      font-weight: 800;
+      margin: 0;
+      opacity: 0.9;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .barcodeWrap {
+      display: flex;
+      align-items: flex-end;
+      justify-content: flex-start;
+      overflow: hidden;
+    }
+    svg.barcode {
+      width: 100%;
+      height: 0.26in; /* slightly smaller to fit */
+    }
+
+    /* QR column */
+    .qrCol {
+      display:flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      overflow: hidden;
+    }
+
+    .qr {
+      width: var(--qr-size);
+      height: var(--qr-size);
+      background: #fff;
+      border-radius: 0.08in;
+      border: 1px solid rgba(0,0,0,0.12);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+    }
+    .qr canvas, .qr img {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    @media print {
+      .toolbar { display: none; }
+      body { margin: 0.25in; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button class="btn" onclick="window.print()">Print</button>
+    <button class="btn" onclick="window.close()">Close</button>
+    <div style="opacity:.7;font-size:12px;"><%= labels.length %> labels</div>
+  </div>
+
+  <% function level(spread) {
+       if (!Number.isFinite(spread)) return "low";
+       if (spread >= 5) return "high";
+       if (spread >= 2) return "med";
+       return "low";
+     }
+  %>
+
+  <div class="grid">
+    <% labels.forEach(l => { %>
+      <div class="label" data-level="<%= level(l.spread) %>">
+
+        <% if (l.image_url) { %>
+          <img class="img" src="<%= l.image_url %>" />
+        <% } else { %>
+          <div class="img" style="display:flex;align-items:center;justify-content:center;font-size:9px;opacity:.6;">
+            No image
+          </div>
+        <% } %>
+
+        <div class="mid">
+          <p class="name"><%= l.item_name || '(no name)' %></p>
+
+          <p class="price">
+            <%= (typeof l.price === "number")
+                  ? l.price.toLocaleString(undefined, { style: "currency", currency: "USD" })
+                  : "—" %>
+          </p>
+
+          <p class="gtin">GTIN: <%= l.gtin %></p>
+
+          <div class="barcodeWrap">
+            <svg class="barcode" data-value="<%= (l.gtin || '').toString() %>"></svg>
+          </div>
+        </div>
+
+        <div class="qrCol">
+          <div class="qr" data-qr="<%= (baseUrl + '/product-ai?gtin=' + encodeURIComponent((l.gtin || '').toString())) %>"></div>
+        </div>
+
+      </div>
+    <% }) %>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+
+  <script>
+    (function () {
+      const safeVal = (v) => (v || '').toString().trim();
+
+      // Barcode (CODE128)
+      document.querySelectorAll('svg.barcode').forEach(svg => {
+        const val = safeVal(svg.getAttribute('data-value'));
+        if (!val) return;
+
+        try {
+          JsBarcode(svg, val, {
+            format: "CODE128",
+            displayValue: false,
+            margin: 0,
+            width: 1.15,
+            height: 24
+          });
+        } catch (e) {
+          console.error("Barcode failed for:", val, e);
+        }
+      });
+
+      // QR (payload = GTIN; change if you want SKU/URL)
+      document.querySelectorAll('.qr').forEach(el => {
+        const val = safeVal(el.getAttribute('data-qr'));
+        if (!val) return;
+
+        try {
+          new QRCode(el, {
+            text: val,
+            width: 70,
+            height: 70,
+            correctLevel: QRCode.CorrectLevel.M
+            });
+        } catch (e) {
+          console.error("QR failed for:", val, e);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -15,7 +15,8 @@
     "sync:missing-items-to-square": "node scripts/syncMissingItemsToSquare.js",
     "rebuild:master-inventory": "node scripts/rebuildMasterInventory.js",
     "copy-images": "node scripts/copyImagesAcrossMerchants.js",
-    "test": "jest --runInBand",
+    "gen:tests": "node scripts/generate-tests.mjs",
+    "test": "NODE_ENV=test jest --runInBand",
     "test:watch": "jest --watch",
     "test:ci": "jest --ci --runInBand"
   },

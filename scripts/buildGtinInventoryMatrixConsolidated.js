@@ -97,6 +97,52 @@ function makeSearchKey(s) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+function pickImageUrlFromInventoryDoc(d) {
+  if (!d) return "";
+
+  // Common field names you may have in Firestore inventory docs
+  const direct = [
+    d.image_url,
+    d.imageUrl,
+    d.image,
+    d.photo_url,
+    d.photoUrl,
+    d.item_image_url,
+    d.square_image_url,
+    d.squareImageUrl,
+    d.catalog_image_url,
+  ].filter(Boolean);
+
+  if (direct.length) return safeStr(direct[0]).trim();
+
+  // Arrays
+  if (Array.isArray(d.image_urls) && d.image_urls.length) return safeStr(d.image_urls[0]).trim();
+  if (Array.isArray(d.imageUrls) && d.imageUrls.length) return safeStr(d.imageUrls[0]).trim();
+
+  // Nested common patterns
+  const nested =
+    d?.images?.[0]?.url ||
+    d?.images?.[0]?.image_url ||
+    d?.images?.[0]?.imageUrl ||
+    d?.item_image?.url ||
+    d?.item_image?.image_url ||
+    "";
+
+  return safeStr(nested).trim();
+}
+
+// Keep the first good one found (simple & stable)
+function chooseBestImageUrl(current, next) {
+  const c = safeStr(current).trim();
+  if (c) return c;
+
+  const n = safeStr(next).trim();
+  if (n) return n;
+
+  return "";
+}
+
+
 async function deleteCollectionByQuery(colRef, pageSize = 450) {
   let totalDeleted = 0;
 
@@ -442,28 +488,32 @@ async function run() {
 
         // ✅ Upsert rich location index entry (no separate backfill needed)
         if (!locationIndex.has(locKey)) {
-          const label = getMerchantLabel(d, merchantId, merchantLabelMap);
+          const merchantLabel = getMerchantLabel(d, merchantId, merchantLabelMap) || merchantId;
 
-          if (!label) {
-            console.warn(`⚠️ No label found for merchantId=${merchantId}. Using merchantId as display label. Fix MERCHANT_LABELS.`);
-          }
+          const locationId = safeStr(d.location_id || d.locationId).trim() || null;
+          const locationName =
+            safeStr(d.location_name || d.locationName).trim() ||
+            (locationId ? locationId : "Unknown Location");
 
           locationIndex.set(locKey, {
             locKey,
             merchant_id: merchantId,
-            merchant_name: label || merchantId,
-            location_id: null,
-            location_name: label || merchantId,
+            merchant_name: merchantLabel,
+            location_id: locationId,
+            location_name: locationName,
           });
         } else {
           const cur = locationIndex.get(locKey);
-          const label = getMerchantLabel(d, merchantId, merchantLabelMap);
 
-          if (label) {
-            if (!cur.merchant_name || cur.merchant_name === merchantId) cur.merchant_name = label;
-            if (!cur.location_name || cur.location_name === merchantId) cur.location_name = label;
-          }
+          const merchantLabel = getMerchantLabel(d, merchantId, merchantLabelMap) || merchantId;
+          const locationId = safeStr(d.location_id || d.locationId).trim() || null;
+          const locationName = safeStr(d.location_name || d.locationName).trim() || null;
+
+          if (merchantLabel && (!cur.merchant_name || cur.merchant_name === merchantId)) cur.merchant_name = merchantLabel;
+          if (locationId && !cur.location_id) cur.location_id = locationId;
+          if (locationName && (!cur.location_name || cur.location_name === "Unknown Location")) cur.location_name = locationName;
         }
+
 
         const price = d.price !== undefined && d.price !== null ? Number(d.price) : null;
 
@@ -474,8 +524,8 @@ async function run() {
           merchant_id: d.merchant_id || merchantId || null,
           merchant_name: getMerchantLabel(d, merchantId, merchantLabelMap) || null,
 
-          location_id: d.location_id || null,
-          location_name: d.location_name || null,
+          location_id: d.location_id || d.locationId || null,
+          location_name: d.location_name || d.locationName || null,
 
           variation_id: d.variation_id || null,
           item_id: d.item_id || null,
@@ -493,7 +543,7 @@ async function run() {
           agg = {
             gtin: gtinKey,
             gtin_raws: [],
-            header: { item_name: "", category_name: "", sku: "" },
+            header: { item_name: "", category_name: "", sku: "", image_url: "" },
             pricesByLocation: {},
           };
           pageByGtin.set(gtinKey, agg);
@@ -509,6 +559,15 @@ async function run() {
         if (!agg.header.item_name) agg.header.item_name = safeStr(d.item_name).trim();
         if (!agg.header.category_name) agg.header.category_name = safeStr(d.category_name).trim();
         if (!agg.header.sku) agg.header.sku = safeStr(d.sku).trim();
+
+        // ✅ image_url (first non-empty wins)
+        if (!agg.header.image_url) {
+          const img = pickImageUrlFromInventoryDoc(d);
+          if (img) agg.header.image_url = img;
+        } else {
+          // optional: if you want to allow replacement logic later
+          // agg.header.image_url = chooseBestImageUrl(agg.header.image_url, pickImageUrlFromInventoryDoc(d));
+        }
 
         // best loc info per (gtinKey, locKey)
         const prevLocInfo = agg.pricesByLocation[locKey];
@@ -528,6 +587,8 @@ async function run() {
         const nameKey = itemName ? makeSearchKey(itemName) : null;
         const skuKey = sku ? makeSearchKey(sku) : null;
         const searchTokens = makeSearchTokens(itemName, sku);
+        const categoryName = agg.header.category_name || null;
+        const categoryKey = categoryName ? makeSearchKey(categoryName) : null;
 
         const payload = {
           gtin: agg.gtin,
@@ -538,6 +599,9 @@ async function run() {
           ...(sku ? { sku } : {}),
           ...(skuKey ? { sku_key: skuKey } : {}),
           ...(searchTokens.length ? { search_tokens: searchTokens } : {}),
+          ...(agg.header.image_url ? { image_url: agg.header.image_url } : {}),
+          ...(categoryName ? { category_name: categoryName } : {}),
+          ...(categoryKey ? { category_key: categoryKey } : {}),
           pricesByLocation: agg.pricesByLocation,
           updated_at: nowIso,
         };
