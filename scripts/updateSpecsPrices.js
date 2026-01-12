@@ -1,5 +1,5 @@
 // scripts/updateSpecsPrices.js
-require('dotenv').config();
+require("../lib/loadEnv"); // adjust relative path
 
 const firestore = require('../lib/firestore'); // or './lib/firestore' from root
 
