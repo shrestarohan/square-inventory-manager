@@ -71,7 +71,7 @@ Examples:
   $0 all
   $0 execute
   $0 execute -- ENV_FILE=.env.deploy
-  $0 execute -- ENV_FILE=.env.deploy node $DEFAULT_SCRIPT
+  $0 execute -- ENV_FILE=.env.deploy RUN_CLEAN=1 CLEAN_CONFIRM=DELETE node $DEFAULT_SCRIPT
   $0 execute -- /bin/sync_firestore_db.sh
 EOF
 }
@@ -183,7 +183,7 @@ execute_job() {
   secret_name="$(choose_env_secret "$env_file")"
 
   # Default command for this run (if user doesn't override)
-  local run_cmd="node $DEFAULT_SCRIPT"
+  local run_cmd="RUN_CLEAN=0 RUN_SYNC=1 RUN_BUILD=1 RUN_META=1 node $DEFAULT_SCRIPT"
   if [[ $# -gt 0 ]]; then
     run_cmd="$*"
   fi

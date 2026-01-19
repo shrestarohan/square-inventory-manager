@@ -1,12 +1,12 @@
 // app.js
 require("./lib/loadEnv");
+const firestore = require('./lib/firestore');
 
 const path = require("path");
 const express = require('express');
 const session = require('express-session');
 const passport = require('passport');
 
-const firestore = require('./lib/firestore');
 const appContext = require('./middleware/appContext');
 const requireLogin = require('./middleware/requireLogin');
 
@@ -199,7 +199,7 @@ app.use(require("./routes/replenishmentAiPage")({ firestore, requireLogin }));
 app.use(require("./routes/replenishmentAiApi")({ firestore, requireLogin }));
 
 app.use(require("./routes/printPriceLabels")({ firestore, requireLogin }));
-app.use(require("./routes/productAiPage")({ firestore, requireLogin }));
+app.use(require("./routes/productAiPage")({ firestore, requireLogin, publicAccess: true }));
 
 // -----------------------------
 // Pages (all res.render routes)

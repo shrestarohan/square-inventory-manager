@@ -1,13 +1,16 @@
 const express = require("express");
 const OpenAI = require("openai");
 
-module.exports = function buildProductAiPageRouter({ firestore, requireLogin }) {
+module.exports = function buildProductAiPageRouter({ firestore, requireLogin, publicAccess = true }) {
   const router = express.Router();
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  // very small in-memory cache to avoid regenerating every scan
-  const _cache = new Map(); // gtin -> { expiresAt, html, json }
-  const CACHE_MS = 1000 * 60 * 30; // 30 minutes
+  const _cache = new Map();
+  const CACHE_MS = 1000 * 60 * 30;
+
+  // ✅ locKey -> label cache (10 min)
+  let _locMapCache = { expiresAt: 0, map: null };
+  const LOCMAP_MS = 1000 * 60 * 10;
 
   function now() { return Date.now(); }
 
@@ -16,18 +19,50 @@ module.exports = function buildProductAiPageRouter({ firestore, requireLogin }) 
     return n.toLocaleString(undefined, { style: "currency", currency: "USD" });
   }
 
-  router.get("/product-ai", requireLogin, async (req, res) => {
+  async function getLocLabelMapCached() {
+    const t = now();
+    if (_locMapCache.map && _locMapCache.expiresAt > t) return _locMapCache.map;
+
+    const snap = await firestore.collection("location_index").get();
+    const map = {};
+
+    snap.forEach(doc => {
+      const r = doc.data() || {};
+      const key = (r.locKey || doc.id || "").toString();
+      if (!key) return;
+
+      const label =
+        (r.location_name || "").toString().trim() ||
+        (r.locationName || "").toString().trim() ||   // optional alt field
+        (r.location || "").toString().trim() ||       // optional alt field
+        (r.merchant_name || "").toString().trim() ||
+        (r.merchantName || "").toString().trim() ||   // optional alt field
+        key;
+
+      map[key] = label;
+    });
+
+    _locMapCache = { map, expiresAt: t + LOCMAP_MS };
+    return map;
+  }
+
+  // ✅ Optional auth
+  const maybeAuth = (req, res, next) => {
+    if (publicAccess) return next();
+    if (typeof requireLogin === "function") return requireLogin(req, res, next);
+    return next();
+  };
+
+  router.get("/product-ai", maybeAuth, async (req, res) => {
     try {
       const gtin = (req.query.gtin || "").toString().trim();
       if (!gtin) return res.status(400).send("Missing gtin");
 
-      // cache hit
       const cached = _cache.get(gtin);
       if (cached && cached.expiresAt > now()) {
         return res.render("product-ai", cached.json);
       }
 
-      // pull product from your consolidated matrix doc
       const docRef = firestore.collection("gtin_inventory_matrix").doc(gtin);
       const snap = await docRef.get();
       if (!snap.exists) return res.status(404).send(`GTIN not found: ${gtin}`);
@@ -35,9 +70,12 @@ module.exports = function buildProductAiPageRouter({ firestore, requireLogin }) 
       const d = snap.data() || {};
       const pricesByLocation = d.pricesByLocation || {};
 
+      // ✅ load label map (cached)
+      const locLabelMap = await getLocLabelMapCached();
+
       const prices = Object.entries(pricesByLocation).map(([locKey, info]) => ({
         locKey,
-        label: locKey, // if you have locationsMeta labels, swap here
+        label: locLabelMap[locKey] || locKey,
         price: (typeof info?.price === "number" && Number.isFinite(info.price)) ? info.price : null,
         currency: info?.currency || info?.currency_code || "USD",
       }));
@@ -46,7 +84,6 @@ module.exports = function buildProductAiPageRouter({ firestore, requireLogin }) 
       const minPrice = numeric.length ? Math.min(...numeric) : null;
       const maxPrice = numeric.length ? Math.max(...numeric) : null;
 
-      // Build a compact product context for AI
       const productContext = {
         gtin: d.gtin || gtin,
         sku: d.sku || "",
@@ -59,7 +96,6 @@ module.exports = function buildProductAiPageRouter({ firestore, requireLogin }) 
         locations_total: prices.length,
       };
 
-      // Keep the prompt structured so the output is consistently useful
       const prompt = `
 You are a retail merchandising assistant for a liquor/convenience store.
 Generate an in-store "AI product page" for staff and customers.
@@ -101,13 +137,8 @@ Return STRICT JSON with keys:
       });
 
       let aiJson = {};
-      try {
-        aiJson = JSON.parse(ai.choices?.[0]?.message?.content || "{}");
-      } catch {
-        aiJson = {};
-      }
+      try { aiJson = JSON.parse(ai.choices?.[0]?.message?.content || "{}"); } catch {}
 
-      // Render model
       const viewModel = {
         item: {
           gtin: productContext.gtin,
@@ -116,9 +147,7 @@ Return STRICT JSON with keys:
           category_name: productContext.category_name,
           image_url: productContext.image_url,
         },
-        prices: prices
-          .slice()
-          .sort((a,b) => (a.label || "").localeCompare(b.label || "")),
+        prices: prices.slice().sort((a, b) => (a.label || "").localeCompare(b.label || "")),
         minPriceText: money(minPrice),
         maxPriceText: money(maxPrice),
         ai: aiJson,
@@ -126,7 +155,6 @@ Return STRICT JSON with keys:
       };
 
       _cache.set(gtin, { expiresAt: now() + CACHE_MS, json: viewModel });
-
       return res.render("product-ai", viewModel);
     } catch (err) {
       console.error("product-ai error:", err);

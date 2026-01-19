@@ -3,14 +3,14 @@ const express = require('express');
 const crypto = require('crypto');
 
 async function loadMerchantAuth(firestore, merchantId) {
-  const snap = await firestore.collection('merchants').doc(merchantId).get();
+  const snap = await firestore.collection("merchants").doc(merchantId).get();
   const m = snap.exists ? (snap.data() || {}) : null;
 
-  const accessToken = (m?.access_token || '').toString().trim();
-  const refreshToken = (m?.refresh_token || '').toString().trim();
+  const accessToken = (m?.access_token || "").toString().trim() || null;
+  const refreshToken = (m?.refresh_token || "").toString().trim() || null;
   const env = (m?.env || 'production').toString();
 
-  return { m, accessToken: accessToken || null, refreshToken: refreshToken || null, env };
+  return { m, accessToken, refreshToken, env };
 }
 
 async function refreshSquareTokenIfPossible({

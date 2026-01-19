@@ -16,7 +16,8 @@
  *   RUN_CLEAN=1 CLEAN_CONFIRM=DELETE node scripts/fullNightlySync.js
  *
  *   # Clean only derived collections then rebuild
- *   RUN_CLEAN=1 CLEAN_CONFIRM=DELETE RUN_SYNC=0 RUN_BUILD=1 node scripts/fullNightlySync.js
+ *   RUN_CLEAN=0 RUN_SYNC=1 RUN_BUILD=1 RUN_META=1 node scripts/fullNightlySync.js
+ *   RUN_CLEAN=1 CLEAN_CONFIRM=DELETE RUN_SYNC=1 RUN_BUILD=1 RUN_META=1 node scripts/fullNightlySync.js
  *
  * ENV VARS
  *   RUN_CLEAN  = 1/0   (default 0)  -> delete derived collections first

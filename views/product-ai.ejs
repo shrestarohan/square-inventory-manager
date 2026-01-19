@@ -1,9 +1,5 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title><%= item.item_name || 'Product' %></title>
-  <link rel="stylesheet" href="/styles.css" />
+<%- include('partials/head', { title: 'Product Info' }) %>
+
   <style>
     .wrap { max-width: 980px; margin: 16px auto; padding: 0 14px; }
     .card { background:#fff; border:1px solid #eee; border-radius:14px; padding:14px; box-shadow:0 1px 10px rgba(0,0,0,0.05); }
@@ -21,8 +17,7 @@
     @media (min-width: 860px) { .grid2 { grid-template-columns: 1fr 1fr; } }
     .muted { opacity:.7; font-size:12px; }
   </style>
-</head>
-<body>
+  
   <div class="wrap">
     <div class="card">
       <div class="top">
@@ -103,5 +98,4 @@
       </table>
     </div>
   </div>
-</body>
-</html>
+<%- include('partials/foot') %>

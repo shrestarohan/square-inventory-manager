@@ -12,6 +12,10 @@
   <meta charset="utf-8" />
   <title>Price Mismatch Dashboard</title>
   <link rel="stylesheet" href="/styles.css" />
+  <style>
+    .cell-wrap { display:flex; flex-direction:column; gap:4px; }
+    .qty-text { font-size:12px; opacity:.75; }
+  </style>
 </head>
 <body>
   <%- include('partials/header', {
@@ -274,7 +278,7 @@
 
       locationKeys.forEach(locKey => {
         const th = document.createElement('th');
-        th.textContent = locLabel(locKey) + ' (Price)';
+        th.textContent = locLabel(locKey) + ' (Price / Qty)';
         headerRow.appendChild(th);
       });
       headerBuilt = true;
@@ -572,6 +576,8 @@
           input.dataset.merchantId = data.toMerchantId || '';
           input.dataset.variationId = data.toVariationId || '';
           input.dataset.currency = data.currency || 'USD';
+          input.dataset.gtin = gtin;
+          input.dataset.locKey = toLocKey;
 
           input.addEventListener('change', handlePriceChange);
           td.appendChild(input);
@@ -588,7 +594,19 @@
       }
     }
 
-
+    function pickQty(info) {
+      if (!info) return null;
+      const v =
+        info.qty ??
+        info.quantity ??
+        info.on_hand ??
+        info.onHand ??
+        info.available ??
+        info.available_qty ??
+        info.stock ??
+        null;
+      return (v === 0 || v) ? v : null;
+    }
 
     function renderTable() {
       tbody.innerHTML = '';
@@ -719,6 +737,9 @@
           const info = r.pricesByLocation?.[locKey];
 
           if (info) {
+            const wrap = document.createElement('div');
+            wrap.className = 'cell-wrap';
+
             const input = document.createElement('input');
             input.type = 'number';
             input.step = '0.01';
@@ -731,17 +752,26 @@
             input.dataset.merchantId = mid;
             input.dataset.variationId = vid;
             input.dataset.currency = info.currency || info.currency_code || 'USD';
+            input.dataset.gtin = r.gtin || '';
+            input.dataset.locKey = locKey;
 
-            // Optional: if missing ids, visually mark + disable
             if (!mid || !vid) {
               input.disabled = true;
               input.title = 'Missing merchant_id/variation_id in matrix data';
               input.classList.add('price-error');
             }
 
-
             input.addEventListener('change', handlePriceChange);
-            td.appendChild(input);
+
+            // ✅ Qty label
+            const qtyEl = document.createElement('div');
+            qtyEl.className = 'qty-text';
+            const qty = pickQty(info);
+            qtyEl.textContent = `Qty: ${qty == null ? '-' : qty}`;
+
+            wrap.appendChild(input);
+            wrap.appendChild(qtyEl);
+            td.appendChild(wrap);
           } else {
             // ✅ Missing in this location: show "Copy" action
             const fromLocKey = locationKeys.find(k => r.pricesByLocation?.[k]); // first location that exists
@@ -759,8 +789,6 @@
 
             td.appendChild(btn);
           }
-
-
           tr.appendChild(td);
         });
 
@@ -865,10 +893,13 @@
       input.classList.remove('price-error');
 
       try {
+        const gtin = input.dataset.gtin || '';
+        const locKey = input.dataset.locKey || '';
+
         const res = await fetch('/api/update-item-price', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ merchantId, variationId, price: numericPrice, currency }),
+          body: JSON.stringify({ merchantId, variationId, price: numericPrice, currency, gtin, locKey }),
         });
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update price');
