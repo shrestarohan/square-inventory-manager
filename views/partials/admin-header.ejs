@@ -1,0 +1,28 @@
+<!-- views/partials/admin-header.ejs -->
+<header class="admin-header">
+  <div class="admin-header-inner container">
+    <div class="brand">
+      <div class="brand-badge"></div>
+      <div class="brand-title">
+        <b><%= appName || 'Admin Console' %></b>
+        <span><%= subtitle || 'Management' %></span>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <a class="pill <%= (activeNav === 'auth' ? 'active' : '') %>" href="/admin/auth">🔐 Auth Policy</a>
+      <a class="pill <%= (activeNav === 'users' ? 'active' : '') %>" href="/admin/users">👤 Users</a>
+      <a class="pill" href="/dashboard">↩︎ Back</a>
+    </nav>
+
+    <div class="right">
+      <div class="userchip" title="<%= (user?.email || '') %>">
+        <%= (user?.email || 'unknown user') %>
+      </div>
+
+      <form method="post" action="/logout" style="margin:0;">
+        <button class="btn danger" type="submit">Logout</button>
+      </form>
+    </div>
+  </div>
+</header>

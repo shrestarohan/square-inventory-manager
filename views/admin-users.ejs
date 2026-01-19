@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <%- include('partials/admin-head', { title: 'Users' }) %>
+</head>
+<body>
+  <%- include('partials/admin-header', {
+    appName: 'Square Inventory Sync',
+    subtitle: 'Local username/password users',
+    activeNav: 'users',
+    user: (typeof user !== 'undefined' ? user : (typeof currentUser !== 'undefined' ? currentUser : null)),
+  }) %>
+
+  <main class="container page">
+    <div class="hero">
+      <div>
+        <h1>Local Users</h1>
+        <p>Manage username/password users stored in Firestore. Passwords are stored as bcrypt hashes.</p>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <button id="reloadBtn" class="btn" type="button">Reload</button>
+        <span id="status" class="help" style="margin:0;"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 10px 0;">Create User</h3>
+
+      <div class="row">
+        <div>
+          <label>Email (doc id)</label>
+          <input id="cEmail" placeholder="email" />
+        </div>
+
+        <div>
+          <label>Username (optional)</label>
+          <input id="cUsername" placeholder="username (optional)" />
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <div>
+          <label>Role</label>
+          <select id="cRole">
+            <option value="user">user</option>
+            <option value="admin">admin</option>
+          </select>
+        </div>
+
+        <div>
+          <label>Status</label>
+          <select id="cEnabled">
+            <option value="1">enabled</option>
+            <option value="0">disabled</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <div>
+          <label>Password</label>
+          <input id="cPassword" placeholder="password (min 8 chars)" type="password" />
+          <div class="help">Use 12+ characters recommended.</div>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:flex-end;">
+          <button id="cBtn" class="btn primary" type="button">Create</button>
+          <span id="cStatus" class="help" style="margin:0;"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <h3 style="margin:0;">Users</h3>
+        <div class="help" style="margin:0;">Tip: password updates only apply if you enter a new password.</div>
+      </div>
+
+      <div style="overflow:auto; margin-top:12px;">
+        <table style="width:100%; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left; padding:10px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted);">Email (doc id)</th>
+              <th style="text-align:left; padding:10px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted);">Username</th>
+              <th style="text-align:left; padding:10px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted);">Role</th>
+              <th style="text-align:left; padding:10px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted);">Enabled</th>
+              <th style="text-align:left; padding:10px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted);">Password</th>
+              <th style="text-align:left; padding:10px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted);">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+
+      <div id="toast" class="toast" style="display:none;"></div>
+    </div>
+  </main>
+
+  <%- include('partials/admin-footer', {
+    appName: 'Square Inventory Sync',
+    dbName: (typeof dbName !== 'undefined' ? dbName : null),
+  }) %>
+
+  <script>
+    const tbody = document.getElementById('tbody');
+    const statusEl = document.getElementById('status');
+
+    const cEmail = document.getElementById('cEmail');
+    const cUsername = document.getElementById('cUsername');
+    const cRole = document.getElementById('cRole');
+    const cEnabled = document.getElementById('cEnabled');
+    const cPassword = document.getElementById('cPassword');
+    const cBtn = document.getElementById('cBtn');
+    const cStatus = document.getElementById('cStatus');
+    const toastEl = document.getElementById('toast');
+
+    function toast(msg, kind){
+      if (!toastEl) return;
+      toastEl.style.display = 'block';
+      toastEl.className = 'toast ' + (kind || '');
+      toastEl.textContent = msg;
+      setTimeout(() => { toastEl.style.display = 'none'; }, 1600);
+    }
+
+    function escHtml(s){
+      return String(s || '')
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#39;');
+    }
+
+    async function loadUsers(){
+      if (statusEl) statusEl.textContent = 'Loading…';
+
+      const res = await fetch('/api/admin/users', { headers: { 'Accept':'application/json' }});
+      const data = await res.json().catch(()=>({}));
+
+      if (!res.ok || !data.success) {
+        if (statusEl) statusEl.textContent = '';
+        toast(data.error || 'Failed to load', 'err');
+        return;
+      }
+
+      const users = data.users || [];
+      tbody.innerHTML = '';
+
+      users.forEach(u => {
+        const tr = document.createElement('tr');
+
+        tr.innerHTML = `
+          <td style="padding:10px; border-bottom:1px solid var(--line); font-size:13px;">
+            <b>${escHtml(u.email || u.id)}</b>
+          </td>
+
+          <td style="padding:10px; border-bottom:1px solid var(--line); font-size:13px;">
+            <input data-k="username" value="${escHtml(u.username||'')}" style="min-width:160px;">
+          </td>
+
+          <td style="padding:10px; border-bottom:1px solid var(--line); font-size:13px;">
+            <select data-k="role">
+              <option value="user" ${u.role==='user'?'selected':''}>user</option>
+              <option value="admin" ${u.role==='admin'?'selected':''}>admin</option>
+            </select>
+          </td>
+
+          <td style="padding:10px; border-bottom:1px solid var(--line); font-size:13px;">
+            <select data-k="enabled">
+              <option value="1" ${u.enabled ? 'selected' : ''}>enabled</option>
+              <option value="0" ${!u.enabled ? 'selected' : ''}>disabled</option>
+            </select>
+          </td>
+
+          <td style="padding:10px; border-bottom:1px solid var(--line); font-size:13px;">
+            <input data-k="password" type="password" placeholder="reset password…" style="min-width:170px;">
+          </td>
+
+          <td style="padding:10px; border-bottom:1px solid var(--line); font-size:13px;">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button data-act="save" class="btn primary" type="button">Save</button>
+              <button data-act="disable" class="btn danger" type="button">Disable</button>
+              <span class="help" data-k="msg" style="margin:0;"></span>
+            </div>
+          </td>
+        `;
+
+        tr.dataset.id = u.id;
+        tbody.appendChild(tr);
+      });
+
+      if (statusEl) statusEl.textContent = '';
+      toast(`Loaded ${users.length} users`, 'ok');
+    }
+
+    async function createUser(){
+      cStatus.textContent = 'Creating…';
+
+      const payload = {
+        email: cEmail.value.trim(),
+        username: cUsername.value.trim(),
+        role: cRole.value,
+        enabled: cEnabled.value === '1',
+        password: cPassword.value
+      };
+
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json().catch(()=>({}));
+
+      if (!res.ok || !data.success) {
+        cStatus.textContent = '';
+        toast(data.error || 'Create failed', 'err');
+        return;
+      }
+
+      toast('Created ✅', 'ok');
+      cStatus.textContent = '';
+      cPassword.value = '';
+      await loadUsers();
+    }
+
+    async function saveRow(tr){
+      const id = tr.dataset.id;
+
+      const username = tr.querySelector('[data-k="username"]').value;
+      const role = tr.querySelector('[data-k="role"]').value;
+      const enabled = tr.querySelector('[data-k="enabled"]').value === '1';
+      const password = tr.querySelector('[data-k="password"]').value;
+      const msg = tr.querySelector('[data-k="msg"]');
+
+      msg.textContent = 'Saving…';
+
+      const payload = { username, role, enabled };
+      if (password && password.trim()) payload.password = password;
+
+      const res = await fetch('/api/admin/users/' + encodeURIComponent(id), {
+        method: 'PUT',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json().catch(()=>({}));
+
+      if (!res.ok || !data.success) {
+        msg.textContent = '';
+        toast(data.error || 'Save failed', 'err');
+        return;
+      }
+
+      tr.querySelector('[data-k="password"]').value = '';
+      msg.textContent = '';
+      toast('Saved ✅', 'ok');
+    }
+
+    async function disableRow(tr){
+      const id = tr.dataset.id;
+      if (!confirm('Disable ' + id + '?')) return;
+
+      const msg = tr.querySelector('[data-k="msg"]');
+      msg.textContent = 'Disabling…';
+
+      const res = await fetch('/api/admin/users/' + encodeURIComponent(id), { method: 'DELETE' });
+      const data = await res.json().catch(()=>({}));
+
+      if (!res.ok || !data.success) {
+        msg.textContent = '';
+        toast(data.error || 'Disable failed', 'err');
+        return;
+      }
+
+      msg.textContent = '';
+      toast('Disabled ✅', 'ok');
+      await loadUsers();
+    }
+
+    tbody.addEventListener('click', (e) => {
+      const btn = e.target;
+      const tr = btn.closest('tr');
+      if (!tr) return;
+
+      const act = btn.dataset.act;
+      if (act === 'save') saveRow(tr);
+      if (act === 'disable') disableRow(tr);
+    });
+
+    document.getElementById('reloadBtn').addEventListener('click', loadUsers);
+    cBtn.addEventListener('click', createUser);
+
+    loadUsers();
+  </script>
+</body>
+</html>

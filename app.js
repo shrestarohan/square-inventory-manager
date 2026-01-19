@@ -9,6 +9,8 @@ const passport = require('passport');
 
 const appContext = require('./middleware/appContext');
 const requireLogin = require('./middleware/requireLogin');
+const makeRequireAdmin = require("./middleware/requireAdmin");
+const requireAdmin = makeRequireAdmin({ firestore });
 
 const { createSquareOAuthClient, createSquareClient, makeCreateSquareClientForMerchant } = require('./lib/square');
 const createSquareClientForMerchant = makeCreateSquareClientForMerchant({ firestore });
@@ -88,6 +90,14 @@ const squareOAuthClient = createSquareOAuthClient(SQUARE_ENV);
 // -----------------------------
 // Routers
 // -----------------------------
+
+const buildAdminUsersRouter = require('./routes/adminUsers');
+
+app.use(buildAdminUsersRouter({
+  firestore,
+  requireLogin,
+  requireAdmin, 
+}));
 
 // Auth (login / google / logout) + passport strategies
 app.use(require('./routes/auth')({ firestore, passport }));

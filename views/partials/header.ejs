@@ -73,6 +73,9 @@
       <a href="/category-matrix" class="nav-link <%= activePage === 'category-matrix' ? 'active' : '' %>">
         Category Matrix
       </a>
+      <% if (isAdmin) { %>
+        <a href="/admin/auth" class="nav-link">Admin</a>
+      <% } %>
     </nav>
   </div>
   

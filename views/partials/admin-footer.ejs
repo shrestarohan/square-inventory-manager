@@ -1,0 +1,11 @@
+<!-- views/partials/admin-footer.ejs -->
+<footer class="admin-footer">
+  <div class="admin-footer-inner container">
+    <div>
+      <span class="kbd"><%= (process.env.APP_ENV || process.env.NODE_ENV || 'env') %></span>
+      <span style="margin-left:8px;">DB:</span>
+      <span class="kbd"><%= (dbName || '') %></span>
+    </div>
+    <div>© <%= new Date().getFullYear() %> <%= (appName || 'Your App') %></div>
+  </div>
+</footer>
