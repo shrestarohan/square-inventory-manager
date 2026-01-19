@@ -88,16 +88,21 @@ const SQUARE_ENV = process.env.SQUARE_ENV || 'sandbox';
 const squareOAuthClient = createSquareOAuthClient(SQUARE_ENV);
 
 // -----------------------------
+// Admin Routers
+// -----------------------------
+const buildAdminUsersRouter = require('./routes/adminUsers');
+app.use(buildAdminUsersRouter({ firestore, requireLogin, requireAdmin }));
+
+const buildAdminAuditRouter = require('./routes/adminAudit');
+app.use(buildAdminAuditRouter({ firestore, requireLogin, requireAdmin }));
+
+const buildAdminStoreAccessRouter = require('./routes/adminStoreAccess');
+app.use(buildAdminStoreAccessRouter({ firestore, requireLogin, requireAdmin }));
+
+
+// -----------------------------
 // Routers
 // -----------------------------
-
-const buildAdminUsersRouter = require('./routes/adminUsers');
-
-app.use(buildAdminUsersRouter({
-  firestore,
-  requireLogin,
-  requireAdmin, 
-}));
 
 // Auth (login / google / logout) + passport strategies
 app.use(require('./routes/auth')({ firestore, passport }));
