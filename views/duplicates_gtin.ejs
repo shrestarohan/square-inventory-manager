@@ -13,32 +13,16 @@
         merchantId: null,
         merchants: typeof merchants !== 'undefined' ? merchants : [],
         activePage: 'duplicates-gtin',
-        showFilters: false
+        showFilters: true
       }) %>
 
   <div style="padding: 14px 16px;">
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      <label><strong>Merchant:</strong></label>
-      <select id="merchantPick">
-        <option value="">Select merchant…</option>
-        <% (merchants || []).forEach(m => { %>
-          <option value="<%= m.id %>"><%= m.business_name || m.id %></option>
-        <% }) %>
-      </select>
-
-      <label style="display:flex;gap:6px;align-items:center;">
-        <input type="radio" name="mode" value="gtin" checked />
-        Duplicate GTIN (merchant-wide)
-      </label>
-
-      <label style="display:flex;gap:6px;align-items:center;">
-        <input type="radio" name="mode" value="gtin_location" />
-        Duplicate GTIN + location_id
-      </label>
-
-      <input id="filter" placeholder="Filter results (gtin, item, sku, location)..." style="min-width:320px;" />
-
       <span id="summary" style="opacity:.8;font-size:12px;"></span>
+    </div>
+
+    <div style="margin-top:8px; opacity:.75; font-size:12px;">
+      Showing <strong>true duplicate GTINs</strong> (same GTIN on multiple active catalog variations).
     </div>
   </div>
 
@@ -47,14 +31,13 @@
       <tr>
         <th>Count</th>
         <th>GTIN</th>
-        <th>Location</th>
-        <th>Item</th>
-        <th>SKU</th>
-        <th>Category</th>
+        <th>Canonical Name</th>
+        <th>Items</th>
+        <th>SKUs</th>
       </tr>
     </thead>
     <tbody id="dup-body">
-      <tr><td colspan="6" style="padding:16px;opacity:.7;">Pick a merchant to load duplicates.</td></tr>
+      <tr><td colspan="5" style="padding:16px;opacity:.7;">Pick a merchant to load duplicates.</td></tr>
     </tbody>
   </table>
 
@@ -70,7 +53,7 @@
     function startLoading() {
       if (topLoader) topLoader.classList.add('is-on');
       if (miniSpinner) miniSpinner.classList.add('is-on');
-      if (loadStatus) loadStatus.textContent = ''; // no text
+      if (loadStatus) loadStatus.textContent = '';
       if (topLoaderBar) topLoaderBar.style.width = '10%';
       let p = 10;
       clearInterval(timer);
@@ -90,63 +73,104 @@
       }, 180);
     }
 
-    const merchantPick = document.getElementById('merchantPick');
-    const filter = document.getElementById('filter');
+    const merchantSelect = document.getElementById('merchantSelect');
+    const filter = document.getElementById('search');
     const tbody = document.getElementById('dup-body');
     const summary = document.getElementById('summary');
 
-    let lastData = null;
+    let lastRows = null;
 
-    function getMode() {
-      const r = document.querySelector('input[name="mode"]:checked');
-      return r ? r.value : 'gtin';
+    function escapeHtml(s) {
+      return (s || '').toString().replaceAll('<','&lt;').replaceAll('>','&gt;');
     }
 
-    function renderRows(data) {
-      const q = (filter.value || '').trim().toLowerCase();
-      const rows = (data.dupes || []).filter(r => {
+    function renderRows(rows) {
+      const rawQ = filter.value || '';
+      const q = rawQ.trim().toLowerCase();
+      const qNoSpace = q.replace(/\s+/g, '');
+
+      const norm = (s) => (s || '').toString().toLowerCase().replace(/\s+/g, '');
+
+      const filtered = (rows || []).filter(r => {
         if (!q) return true;
-        const t = [
-          r.gtin, r.location_id, r.location_name, r.item_name, r.sku, r.category_name
-        ].join(' ').toLowerCase();
-        return t.includes(q);
+
+        const itemsText = (r.items || []).join(' ');
+        const skusText = (r.skus || []).join(' ');
+
+        const hay = [
+          r.gtin,
+          r.canonical_name,
+          itemsText,
+          skusText
+        ].join(' ');
+
+        const base = hay.toLowerCase();
+        const noSpace = base.replace(/\s+/g, '');
+
+        return base.includes(q) || noSpace.includes(qNoSpace);
       });
 
       tbody.innerHTML = '';
-      if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="padding:16px;opacity:.7;">No duplicates found.</td></tr>';
+      if (!filtered.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:16px;opacity:.7;">No duplicates found.</td></tr>';
         return;
       }
 
-      for (const r of rows) {
-        const locText = r.location_name
-          ? `${r.location_name} (${r.location_id || ''})`
-          : (r.location_id || '');
-
+      for (const r of filtered) {
         const tr = document.createElement('tr');
+
+        const itemsShort = (r.items || []).slice(0, 6).join(', ');
+        const itemsMore = (r.items || []).length > 6 ? ` (+${(r.items.length - 6)})` : '';
+        const skusShort = (r.skus || []).slice(0, 8).join(', ');
+        const skusMore = (r.skus || []).length > 8 ? ` (+${(r.skus.length - 8)})` : '';
+
         tr.innerHTML = `
-          <td><strong>${r.count}</strong></td>
-          <td>${r.gtin || ''}</td>
-          <td>${locText || ''}</td>
-          <td>${(r.item_name || '').replaceAll('<','&lt;')}</td>
-          <td>${r.sku || ''}</td>
-          <td>${r.category_name || ''}</td>
+          <td><strong>${r.variation_count || 0}</strong></td>
+          <td>${escapeHtml(r.gtin || '')}</td>
+          <td>${escapeHtml(r.canonical_name || '')}</td>
+          <td>${escapeHtml(itemsShort)}${itemsMore}</td>
+          <td>${escapeHtml(skusShort)}${skusMore}</td>
         `;
         tbody.appendChild(tr);
       }
     }
 
+    function normalizeApiRows(apiRows) {
+      // apiRows elements look like: { gtin, canonical_name, variation_count, variations, variations_list }
+      return (apiRows || []).map(r => {
+        const vars = r.variations_list
+          ? r.variations_list
+          : (r.variations && typeof r.variations === 'object' ? Object.values(r.variations) : []);
+
+        const items = vars
+          .map(v => (v && v.item_name) ? v.item_name : '')
+          .filter(Boolean);
+
+        const skus = vars
+          .map(v => (v && v.sku) ? v.sku : '')
+          .filter(Boolean);
+
+        return {
+          gtin: r.gtin,
+          canonical_name: r.canonical_name || (items[0] || ''),
+          variation_count: Number(r.variation_count || vars.length || 0),
+          items,
+          skus,
+        };
+      });
+    }
+
     async function loadDupes() {
-      const merchantId = merchantPick.value;
-      const mode = getMode();
+      const merchantId = merchantSelect.value;
       if (!merchantId) return;
 
       startLoading();
       try {
         const params = new URLSearchParams();
         params.set('merchantId', merchantId);
-        params.set('mode', mode);
-        params.set('top', '1000');
+        params.set('pageSize', '250');           // page size per request
+        params.set('onlyDuplicates', '1');       // ✅ server-side filter
+        params.set('q', '');                     // optional: leave blank to paginate by docId
 
         const res = await fetch('/api/gtin-duplicates?' + params.toString(), {
           headers: { 'Accept': 'application/json' }
@@ -154,22 +178,24 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed');
 
-        lastData = data;
-        summary.textContent =
-          `${data.merchantName} • total docs: ${data.totalDocs} • with GTIN: ${data.withGtin} • duplicate keys: ${data.dupes.length}`;
+        // data.rows contains gtin docs
+        const rows = normalizeApiRows(data.rows || []).filter(r => (r.variation_count || 0) > 1);
+        lastRows = rows;
 
-        renderRows(data);
+        summary.textContent =
+          `merchant: ${merchantId} • duplicate GTINs shown: ${rows.length}`;
+
+        renderRows(rows);
       } catch (e) {
         console.error(e);
-        tbody.innerHTML = `<tr><td colspan="6" style="padding:16px;color:#ffb3b3;">${e.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" style="padding:16px;color:#ffb3b3;">${e.message}</td></tr>`;
       } finally {
         stopLoading();
       }
     }
 
-    merchantPick.addEventListener('change', loadDupes);
-    document.querySelectorAll('input[name="mode"]').forEach(el => el.addEventListener('change', loadDupes));
-    filter.addEventListener('input', () => lastData && renderRows(lastData));
+    merchantSelect.addEventListener('change', loadDupes);
+    filter.addEventListener('input', () => lastRows && renderRows(lastRows));
   </script>
 </body>
 </html>

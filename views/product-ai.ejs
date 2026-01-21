@@ -1,0 +1,101 @@
+<%- include('partials/head', { title: 'Product Info' }) %>
+
+  <style>
+    .wrap { max-width: 980px; margin: 16px auto; padding: 0 14px; }
+    .card { background:#fff; border:1px solid #eee; border-radius:14px; padding:14px; box-shadow:0 1px 10px rgba(0,0,0,0.05); }
+    .top { display:grid; grid-template-columns: 110px 1fr; gap:12px; align-items:center; }
+    .img { width:110px; height:110px; border-radius:12px; object-fit:cover; border:1px solid rgba(0,0,0,0.12); background:#fafafa; }
+    .title { font-size:18px; font-weight:900; margin:0 0 6px 0; }
+    .meta { margin:0; opacity:.8; font-size:12px; display:flex; flex-wrap:wrap; gap:8px; }
+    .pill { display:inline-block; padding:2px 8px; border:1px solid #ddd; border-radius:999px; font-size:12px; opacity:.9; background:#fafafa; }
+    h3 { margin: 14px 0 8px; }
+    ul { margin: 6px 0 0 18px; }
+    table { width:100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { text-align:left; padding:10px; border-bottom:1px solid #eee; }
+    th { font-size:12px; opacity:.7; }
+    .grid2 { display:grid; grid-template-columns: 1fr; gap: 10px; }
+    @media (min-width: 860px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+    .muted { opacity:.7; font-size:12px; }
+  </style>
+  
+  <div class="wrap">
+    <div class="card">
+      <div class="top">
+        <% if (item.image_url) { %>
+          <img class="img" src="<%= item.image_url %>">
+        <% } else { %>
+          <div class="img" style="display:flex;align-items:center;justify-content:center;opacity:.6;">No image</div>
+        <% } %>
+
+        <div>
+          <div class="title"><%= item.item_name || '(no name)' %></div>
+          <div class="meta">
+            <span class="pill">GTIN: <%= item.gtin %></span>
+            <% if (item.sku) { %><span class="pill">SKU: <%= item.sku %></span><% } %>
+            <% if (item.category_name) { %><span class="pill">Category: <%= item.category_name %></span><% } %>
+            <span class="pill">AI: <%= generatedAt %></span>
+          </div>
+          <p style="margin:10px 0 0 0;"><%= ai.short_description || '' %></p>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div>
+          <h3>Selling points</h3>
+          <ul>
+            <% (ai.selling_points || []).forEach(x => { %><li><%= x %></li><% }) %>
+          </ul>
+
+          <h3>Best use cases</h3>
+          <ul>
+            <% (ai.use_cases || []).forEach(x => { %><li><%= x %></li><% }) %>
+          </ul>
+        </div>
+
+        <div>
+          <h3>Upsell & cross-sell</h3>
+          <ul>
+            <% (ai.upsells || []).forEach(x => { %><li><%= x %></li><% }) %>
+          </ul>
+        </div>
+      </div>
+
+      <h3>Bundles</h3>
+      <% (ai.bundles || []).forEach(b => { %>
+        <div class="card" style="margin:10px 0; box-shadow:none;">
+          <div style="font-weight:900;"><%= b.title %></div>
+          <div class="muted">Includes: <%= (b.includes || []).join(", ") %></div>
+          <div style="margin-top:6px;"><%= b.pitch %></div>
+        </div>
+      <% }) %>
+
+      <h3>Staff script</h3>
+      <ul>
+        <% (ai.staff_script || []).forEach(x => { %><li><%= x %></li><% }) %>
+      </ul>
+
+      <h3>Prices by location</h3>
+      <table>
+        <thead>
+          <tr><th>Location</th><th>Price</th></tr>
+        </thead>
+        <tbody>
+          <% if (!prices.length) { %>
+            <tr><td colspan="2" class="muted">No price data.</td></tr>
+          <% } %>
+
+          <% prices.forEach(p => { %>
+            <tr>
+              <td><%= p.label %></td>
+              <td>
+                <%= (typeof p.price === "number")
+                      ? p.price.toLocaleString(undefined, { style: "currency", currency: p.currency || "USD" })
+                      : "—" %>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+<%- include('partials/foot') %>

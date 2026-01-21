@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Price Labels</title>
+  <style>
+    @page { size: 3.5in 1.125in; margin: 0; }
+
+    html, body{
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .toolbar{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      margin:10px;
+    }
+    .btn{
+      padding:8px 10px;
+      border:1px solid #ddd;
+      border-radius:10px;
+      background:#fff;
+      cursor:pointer;
+    }
+
+    :root{
+      --label-w: 3.5in;
+      --label-h: 1.125in;
+
+      --pad: 0.05in;
+      --col-gap: 0.05in;
+
+      --img-w: 1.00in;
+      --img-h: 1.00in;
+      --qr-w: 0.66in;
+
+      --name-size: 11px;
+
+      --divider-h: 1px;
+      --divider-opacity: 0.55;
+      --divider-margin-top: 2px;
+
+      /* ✅ MID fixed row heights (prevents overlap)
+         Inner height: 1.125 - 0.10 = 1.025in */
+      --mid-price-h: 0.48in;  /* ⬆️ bigger price needs more vertical room */
+      --mid-name-h:  0.19in;  /* slightly reduced */
+      --mid-bar-h:   0.35in;  /* slightly reduced */
+      /* Sum: 1.02in (safe) */
+
+      --barcode-svg-h: 0.30in;
+    }
+
+    .grid{ display:block; }
+
+    .label{
+      width: var(--label-w);
+      height: var(--label-h);
+      box-sizing: border-box;
+      padding: var(--pad);
+
+      display:grid;
+      grid-template-columns: var(--img-w) 1fr var(--qr-w);
+      gap: var(--col-gap);
+      align-items:start;
+
+      overflow:hidden;
+      page-break-after: always;
+      break-after: page;
+
+      background:#fff;
+      border:1px solid rgba(0,0,0,0.05);
+      border-radius:0.03in;
+    }
+
+    .img{
+      grid-column:1;
+      width: var(--img-w);
+      height: var(--img-h);
+      box-sizing:border-box;
+
+      border-radius:0.06in;
+      border:1px solid rgba(0,0,0,0.15);
+      background:#fff;
+
+      object-fit:cover;
+      display:block;
+      overflow:hidden;
+    }
+
+    .mid{
+      grid-column:2;
+      min-width:0;
+      height: 100%;
+
+      display:grid;
+      grid-template-rows: var(--mid-price-h) var(--mid-name-h) var(--mid-bar-h);
+      align-items:stretch;
+
+      overflow:hidden;
+    }
+
+    /* PRICE row */
+    .priceWrap{
+      display:grid;
+      grid-template-rows: 1fr auto;
+      min-height:0;
+      overflow:hidden;
+    }
+
+    .price{
+      margin:0;
+      font-weight: 900;
+
+      /* ✅ twice-ish as big + stable on DYMO */
+      font-size: 44px;
+      line-height: 0.90;
+      letter-spacing: -0.6px;
+
+      /* ✅ centered */
+      text-align:center;
+      align-self:center;
+      justify-self:center;
+
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      max-width:100%;
+    }
+
+    /* NAME row */
+    .nameWrap{
+      display:grid;
+      grid-template-rows: 1fr auto;
+      min-height:0;
+      overflow:hidden;
+    }
+
+    .name{
+      margin:0;
+      font-size: var(--name-size);
+      line-height: 1.05;
+      text-align:left;
+
+      display:-webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+
+      overflow:hidden;
+      max-height:100%;
+      min-height:0;
+
+      word-break: break-word;
+      overflow-wrap:anywhere;
+
+      align-self:center;
+    }
+
+    .divider{
+      height: var(--divider-h);
+      width: 100%;
+      background:#000;
+      opacity: var(--divider-opacity);
+      margin: var(--divider-margin-top) 0 0 0;
+      justify-self:stretch;
+    }
+
+    /* BARCODE row */
+    .barcodeMidWrap{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+
+      min-height:0;
+      overflow:hidden;
+      background:#fff;
+    }
+
+    svg.barcodeMid{
+      width: 100%;
+      height: var(--barcode-svg-h);
+      display:block;
+      shape-rendering: crispEdges;
+    }
+
+    /* QR column */
+    .qrCol{
+      grid-column:3;
+      display:flex;
+      flex-direction:column;
+      align-items:flex-end;
+      justify-content:flex-start;
+      gap:0.02in;
+      overflow:hidden;
+    }
+
+    .qr{
+      width: var(--qr-w);
+      aspect-ratio: 1 / 1;
+      height:auto;
+
+      background:#fff;
+      padding:2px;
+      box-sizing:border-box;
+
+      border-radius:0.06in;
+      border:1px solid rgba(0,0,0,0.12);
+
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+    }
+
+    .qr canvas, .qr img{
+      width:100% !important;
+      height:100% !important;
+      display:block;
+      image-rendering: pixelated;
+    }
+
+    .gtinRight{
+      width: var(--qr-w);
+      text-align:right;
+      font-size:9px;
+      font-weight:600;
+      line-height:1.05;
+
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      opacity:0.95;
+      margin-top: 10px;
+    }
+
+    .scanMe{
+      width: var(--qr-w);
+      text-align: right;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: 0.2px;
+      opacity: 0.95;
+    }
+
+    @media print{
+      .toolbar{ display:none !important; }
+      .label{
+        margin:0 !important;
+        border:0 !important;
+        border-radius:0 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button class="btn" onclick="window.print()">Print</button>
+    <button class="btn" onclick="window.close()">Close</button>
+    <div style="opacity:.7;font-size:12px;"><%= (Array.isArray(labels) ? labels.length : 0) %> labels</div>
+  </div>
+
+  <% const safeBaseUrl =
+       (typeof baseUrl !== "undefined" && baseUrl)
+         ? baseUrl.toString()
+         : "";
+  %>
+
+  <div class="grid">
+    <% (Array.isArray(labels) ? labels : []).forEach(l => { %>
+      <div class="label">
+
+        <% if (l.image_url) { %>
+          <img class="img" src="<%= l.image_url %>" />
+        <% } else { %>
+          <div class="img" style="display:flex;align-items:center;justify-content:center;font-size:9px;opacity:.6;">
+            No image
+          </div>
+        <% } %>
+
+        <div class="mid">
+          <div class="priceWrap">
+            <p class="price">
+              <%= (typeof l.price === "number")
+                    ? l.price.toLocaleString(undefined, { style: "currency", currency: "USD" })
+                    : "—" %>
+            </p>
+            <div class="divider"></div>
+          </div>
+
+          <div class="nameWrap">
+            <p class="name"><%= l.item_name || '(no name)' %></p>
+          </div>
+
+          <div class="barcodeMidWrap">
+            <svg class="barcodeMid" data-value="<%= (l.gtin || '').toString() %>"></svg>
+          </div>
+        </div>
+
+        <div class="qrCol">
+          <div class="qr" data-qr="<%= (safeBaseUrl + '/product-ai?gtin=' + encodeURIComponent((l.gtin || '').toString())) %>"></div>
+          <div class="scanMe">SCAN ME</div>
+          <div class="gtinRight"><%= (l.gtin || '').toString() %></div>
+        </div>
+
+      </div>
+    <% }) %>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+
+  <script>
+    (function () {
+      const safeVal = (v) => (v || '').toString().trim();
+
+      document.querySelectorAll('svg.barcodeMid').forEach(svg => {
+        const val = safeVal(svg.getAttribute('data-value'));
+        if (!val) return;
+
+        const isEAN13 = /^\d{12,13}$/.test(val);
+
+        try {
+          JsBarcode(svg, val, {
+            format: isEAN13 ? "EAN13" : "CODE128",
+            displayValue: false,
+            margin: 0,
+            width: 2.3,
+            height: 70
+          });
+        } catch (e) {
+          console.error("Barcode failed for:", val, e);
+        }
+      });
+
+      const QR_PX = 220;
+
+      document.querySelectorAll('.qr').forEach(el => {
+        const val = safeVal(el.getAttribute('data-qr'));
+        if (!val) return;
+
+        el.innerHTML = "";
+        try {
+          new QRCode(el, {
+            text: val,
+            width: QR_PX,
+            height: QR_PX,
+            correctLevel: QRCode.CorrectLevel.H
+          });
+        } catch (e) {
+          console.error("QR failed for:", val, e);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

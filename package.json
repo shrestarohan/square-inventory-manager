@@ -13,22 +13,36 @@
     "sync:inventory": "node scripts/syncInventory.js",
     "sync:inventory-coverage": "node scripts/syncInventoryCoverage.js",
     "sync:missing-items-to-square": "node scripts/syncMissingItemsToSquare.js",
-    "rebuild:master-inventory": "node scripts/rebuildMasterInventory.js"
+    "rebuild:master-inventory": "node scripts/rebuildMasterInventory.js",
+    "copy-images": "node scripts/copyImagesAcrossMerchants.js",
+    "gen:tests": "node scripts/generate-tests.mjs",
+    "test": "NODE_ENV=test jest --runInBand",
+    "test:watch": "jest --watch",
+    "test:ci": "jest --ci --runInBand"
   },
   "dependencies": {
     "@google-cloud/firestore": "^7.0.0",
+    "algoliasearch": "^5.46.1",
+    "axios": "^1.13.2",
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.2.3",
     "ejs": "^3.1.9",
     "express": "^4.19.0",
     "express-session": "^1.18.2",
+    "form-data": "^4.0.5",
     "googleapis": "^167.0.0",
+    "multer": "^2.0.2",
+    "openai": "^6.15.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "passport-local": "^1.0.0",
+    "sharp": "^0.34.5",
     "square": "^43.2.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "cross-env": "^10.1.0",
+    "jest": "^30.2.0",
+    "nodemon": "^3.1.11",
+    "supertest": "^7.1.4"
   }
 }

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <%- include('partials/admin-head', { title: 'Auth Policy' }) %>
+</head>
+<body>
+  <%- include('partials/admin-header', {
+    appName: 'Square Inventory Sync',
+    subtitle: 'Google SSO Access Control',
+    activeNav: 'auth',
+    user: (typeof user !== 'undefined' ? user : (typeof currentUser !== 'undefined' ? currentUser : null)),
+  }) %>
+
+  <main class="container page">
+    <div class="hero">
+      <div>
+        <h1>Google SSO Access Control</h1>
+        <p>
+          This controls who is allowed to log in with Google.
+          Super admins from env (always admin): <span class="kbd"><%= (superAdmins || []).join(', ') || '(none)' %></span>
+        </p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div>
+          <label><b>Mode</b></label>
+          <select id="mode">
+            <option value="allowlist">Allowlist emails only</option>
+            <option value="domain">Allowlist domains only</option>
+            <option value="both">Allowlist emails OR domains</option>
+          </select>
+          <div class="help">Tip: start with <span class="kbd">allowlist</span> so you don’t accidentally allow everyone.</div>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:flex-end;">
+          <button id="saveBtn" class="btn primary" type="button">Save</button>
+          <span id="status" class="help" style="margin:0;"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 10px 0;">Allowed Emails</h3>
+      <div class="help" style="margin-top:0;">
+        One per line (or comma/semicolon separated). Example: <span class="kbd">shrestarohan@gmail.com</span>
+      </div>
+      <textarea id="emails" placeholder="email1@domain.com&#10;email2@domain.com"></textarea>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 10px 0;">Allowed Domains</h3>
+      <div class="help" style="margin-top:0;">One per line. Example: <span class="kbd">yourdomain.com</span> (no @)</div>
+      <textarea id="domains" placeholder="yourdomain.com"></textarea>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 10px 0;">Admins</h3>
+      <div class="help" style="margin-top:0;">These users can edit this page. One per line.</div>
+      <textarea id="admins" placeholder="admin@domain.com"></textarea>
+      <div class="help">Tip: keep at least one admin here, or set <span class="kbd">SUPER_ADMIN_EMAILS</span> in env.</div>
+    </div>
+
+    <div id="toast" class="toast" style="display:none;"></div>
+  </main>
+
+  <%- include('partials/admin-footer', {
+    appName: 'Square Inventory Sync',
+    dbName: (typeof dbName !== 'undefined' ? dbName : null),
+  }) %>
+
+  <script>
+    const modeEl = document.getElementById('mode');
+    const emailsEl = document.getElementById('emails');
+    const domainsEl = document.getElementById('domains');
+    const adminsEl = document.getElementById('admins');
+    const saveBtn = document.getElementById('saveBtn');
+    const statusEl = document.getElementById('status');
+    const toastEl = document.getElementById('toast');
+
+    function toLines(arr){
+      return (Array.isArray(arr) ? arr : []).join('\n');
+    }
+
+    function toast(msg, kind){
+      if (!toastEl) return;
+      toastEl.style.display = 'block';
+      toastEl.className = 'toast ' + (kind || '');
+      toastEl.textContent = msg;
+      setTimeout(() => { toastEl.style.display = 'none'; }, 1600);
+    }
+
+    async function load(){
+      statusEl.textContent = 'Loading…';
+
+      const res = await fetch('/api/admin/auth', { headers: { 'Accept': 'application/json' }});
+      const data = await res.json().catch(()=>({}));
+
+      if (!res.ok || !data.success) {
+        statusEl.textContent = 'Failed to load';
+        toast(data.error || 'Failed to load policy', 'err');
+        return;
+      }
+
+      const p = data.data || {};
+      modeEl.value = (p.mode || 'allowlist');
+      emailsEl.value = toLines(p.allowlist_emails);
+      domainsEl.value = toLines(p.allowlist_domains);
+      adminsEl.value = toLines(p.admins);
+
+      statusEl.textContent = '';
+      toast('Loaded', 'ok');
+    }
+
+    async function save(){
+      statusEl.textContent = 'Saving…';
+
+      const payload = {
+        mode: modeEl.value,
+        allowlist_emails_text: emailsEl.value,
+        allowlist_domains_text: domainsEl.value,
+        admins_text: adminsEl.value,
+      };
+
+      const res = await fetch('/api/admin/auth', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json().catch(()=>({}));
+
+      if (!res.ok || !data.success) {
+        statusEl.textContent = '';
+        toast(data.error || 'Save failed', 'err');
+        return;
+      }
+
+      statusEl.textContent = '';
+      toast('Saved ✅', 'ok');
+    }
+
+    saveBtn.addEventListener('click', save);
+    load();
+  </script>
+</body>
+</html>

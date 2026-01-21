@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title><%= pageTitle || 'Coming Soon' %></title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <%- include('partials/header', {
+    pageTitle: pageTitle || 'Coming Soon',
+    currentView: currentView || 'coming-soon',
+    activePage: activePage || 'coming-soon',
+    showFilters: false
+  }) %>
+
+  <div style="padding:18px 16px; max-width: 900px;">
+    <h2 style="margin:0 0 8px 0;">🚧 Coming soon</h2>
+    <p style="margin:0; opacity:.85;">
+      This section is under construction. Check back soon.
+    </p>
+  </div>
+
+  <%- include('partials/footer') %>
+</body>
+</html>

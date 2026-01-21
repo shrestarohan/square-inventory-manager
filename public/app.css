@@ -1,0 +1,70 @@
+/* Global mobile-friendly defaults */
+:root{
+  --page-max: 1100px;
+  --pad: 14px;
+  --line: rgba(0,0,0,.12);
+}
+
+*{ box-sizing:border-box; }
+
+html{
+  -webkit-text-size-adjust: 100%;
+}
+
+body{
+  margin:0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  line-height: 1.35;
+  color:#111;
+  background:#fff;
+}
+
+/* Make images/videos responsive by default */
+img, video{
+  max-width:100%;
+  height:auto;
+}
+
+/* Comfortable tap targets on mobile */
+button, .btn, a{
+  -webkit-tap-highlight-color: transparent;
+}
+button, .btn{
+  min-height: 40px;
+}
+
+/* A simple responsive container you can use anywhere */
+.container{
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: var(--pad);
+}
+
+/* Tables: allow horizontal scroll on small screens */
+.table-wrap{
+  width:100%;
+  overflow:auto;
+  -webkit-overflow-scrolling: touch;
+}
+table{
+  border-collapse: collapse;
+  width:100%;
+}
+th, td{
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align:left;
+}
+
+/* Inputs scale well on mobile (prevents iOS zoom) */
+input, select, textarea{
+  font-size: 16px;
+}
+
+/* Optional: reduce huge desktop toolbars on phones */
+@media (max-width: 700px){
+  .toolbar{
+    flex-wrap: wrap;
+    margin: 10px;
+  }
+}
