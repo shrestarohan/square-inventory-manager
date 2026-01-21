@@ -13,6 +13,7 @@
 const express = require("express");
 const router = express.Router();
 const { makeCreateSquareClientForMerchant } = require("../lib/square");
+const { canonicalGtin } = require("../lib/gtin");
 const crypto = require("crypto");
 
 function newIdemKey(prefix = "copy") {
@@ -61,14 +62,6 @@ function locIdForKey(locKey) {
 
 function digitsOnly(s) {
   return String(s || "").replace(/\D+/g, "");
-}
-
-function normalizeUpcFromGtin(gtin) {
-  const d = digitsOnly(gtin);
-  if (!d) return null;
-  if (d.length === 12) return d;
-  if (d.length === 13) return d;
-  return null;
 }
 
 function normalizeText(v) {
@@ -235,6 +228,7 @@ async function createSquareItemAndVariation({
   squareClient,
   gtin,
   itemName,
+  description,
   sku,
   price,
   currency,
@@ -242,6 +236,8 @@ async function createSquareItemAndVariation({
   customAttributeValues,
 }) {
   const catalogApi = squareClient.catalogApi;
+  const upc = canonicalGtin(gtin);
+  const wantDesc = normalizeText(description);
 
   const itemTempId = `#ITEM_${gtin}`;
   const varTempId = `#VAR_${gtin}`;
@@ -258,6 +254,7 @@ async function createSquareItemAndVariation({
       customAttributeValues: customAttributeValues || undefined,
       itemData: {
         name: itemName || `GTIN ${gtin}`,
+        description: wantDesc || undefined,
         categoryId: categoryId || undefined,
         variations: [
           {
@@ -266,6 +263,10 @@ async function createSquareItemAndVariation({
             itemVariationData: {
               name: "Regular",
               sku: sku || undefined,
+              upc: upc || undefined,
+              trackInventory: true,                  // 🔥 enable stock tracking
+              inventoryAlertType: "LOW_QUANTITY",
+              inventoryAlertThreshold: 2, 
               pricingType: "FIXED_PRICING",
               priceMoney: safePriceMoney,
             },
@@ -378,6 +379,7 @@ async function updateSquareItemAndVariation({
   itemId,
   variationId,
   itemName,
+  description,
   sku,
   price,
   currency,
@@ -385,6 +387,7 @@ async function updateSquareItemAndVariation({
   categoryId,
   customAttributeValues,
 }) {
+
   const catalogApi = squareClient.catalogApi;
 
   let retrieve;
@@ -427,11 +430,14 @@ async function updateSquareItemAndVariation({
     return { ok: false, notFound: true };
   }
 
+  const wantUpc = canonicalGtin(gtin); 
+  const wantDesc = normalizeText(description);
+  const needsDesc = wantDesc && !shallowEq(itemObj?.itemData?.description, wantDesc);
   const needsItemName = !!itemName && !shallowEq(itemObj?.itemData?.name, itemName);
   const needsCategory = !!categoryId && !shallowEq(itemObj?.itemData?.categoryId, categoryId);
   const needsCustomAttrs = !!customAttributeValues && Object.keys(customAttributeValues || {}).length > 0;
 
-  const needsItemUpsert = needsItemName || needsCategory || needsCustomAttrs;
+  const needsItemUpsert = needsItemName || needsCategory || needsCustomAttrs || needsDesc;
 
   // Always compute desired variation changes
   const cents = price != null ? toCents(price) : null;
@@ -445,6 +451,10 @@ async function updateSquareItemAndVariation({
     // mutate item
     if (needsCategory) itemObj.itemData = { ...(itemObj.itemData || {}), categoryId };
     if (needsItemName) itemObj.itemData = { ...(itemObj.itemData || {}), name: itemName };
+
+    if (needsDesc) {
+      itemObj.itemData = { ...(itemObj.itemData || {}), description: wantDesc };
+    }
 
     if (needsCustomAttrs) {
       itemObj.customAttributeValues = {
@@ -468,6 +478,12 @@ async function updateSquareItemAndVariation({
     const vd = { ...(v.itemVariationData || {}) };
 
     if (sku) vd.sku = sku;
+    if (wantUpc) vd.upc = wantUpc;
+    // 🔥 ensure stock tracking is ON
+    vd.trackInventory = true;
+    vd.inventoryAlertType = vd.inventoryAlertType || "LOW_QUANTITY";
+    vd.inventoryAlertThreshold = vd.inventoryAlertThreshold || 2;
+
     if (wantPriceMoney) {
       vd.pricingType = "FIXED_PRICING";
       vd.priceMoney = wantPriceMoney;
@@ -496,9 +512,13 @@ async function updateSquareItemAndVariation({
     });
 
     try {
-      const rItem = await catalogApi.upsertCatalogObject({
+      const rItem = await catalogApi.batchUpsertCatalogObjects({
         idempotencyKey: newIdemKey("copy-item"),
-        object: itemObj,
+        batches: [
+          {
+            objects: [itemObj],
+          },
+        ],
       });
       const errs = rItem?.result?.errors || [];
       if (errs.length) {
@@ -520,6 +540,12 @@ async function updateSquareItemAndVariation({
   // ------------------------
   const varData = { ...(varObj.itemVariationData || {}) };
   if (sku) varData.sku = sku;
+  if (wantUpc) varData.upc = wantUpc;
+  // 🔥 ensure stock tracking is ON
+  varData.trackInventory = true;
+  varData.inventoryAlertType = varData.inventoryAlertType || "LOW_QUANTITY";
+  varData.inventoryAlertThreshold = varData.inventoryAlertThreshold || 2;
+
   if (wantPriceMoney) {
     varData.pricingType = "FIXED_PRICING";
     varData.priceMoney = wantPriceMoney;
@@ -792,6 +818,7 @@ module.exports = function buildCopyItemInfoRouter({ requireLogin, firestore }) {
             itemId: existingItemId,
             variationId: existingVarId,
             itemName,
+            description: patch.description || patch.item_description || fromData.description || null,
             sku,
             price: srcPrice,
             currency: srcCurrency,
@@ -820,6 +847,7 @@ module.exports = function buildCopyItemInfoRouter({ requireLogin, firestore }) {
                 squareClient,
                 gtin,
                 itemName,
+                description: patch.description || patch.item_description || fromData.description || null,
                 sku,
                 price: srcPrice,
                 currency: srcCurrency,
@@ -860,6 +888,7 @@ module.exports = function buildCopyItemInfoRouter({ requireLogin, firestore }) {
               squareClient,
               gtin,
               itemName,
+              description: patch.description || patch.item_description || fromData.description || null,
               sku,
               price: srcPrice,
               currency: srcCurrency,
@@ -906,6 +935,8 @@ module.exports = function buildCopyItemInfoRouter({ requireLogin, firestore }) {
           square_synced_at: new Date().toISOString(),
           square_sync_source: "copy-item-info",
         };
+
+        if (categoryName) destInvWrite.category_name = categoryName;
 
         if (!toSnap.exists) {
           await toInvRef.set(

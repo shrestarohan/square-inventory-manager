@@ -79,37 +79,48 @@ async function runBuilder(mod) {
 // ------------------------------
 // Delete collection helper
 // ------------------------------
-async function deleteCollection({ firestore, collectionName, batchSize = 400, limit = 0 }) {
-  const colRef = firestore.collection(collectionName);
+// FAST delete using Firestore Admin recursiveDelete
+// Supports:
+//   - top-level collections: "gtin_inventory_matrix", "location_index"
+//   - per-merchant subcollections: "merchants/*/inventory"
+//
+// WARNING: This is destructive and fast. Use only with confirmation guards.
 
-  let deleted = 0;
-  let page = 0;
+async function deleteCollection({ firestore, collectionName }) {
+  const name = (collectionName || "").toString().trim();
+  if (!name) throw new Error("deleteCollection: missing collectionName");
 
-  while (true) {
-    // Pull a page of doc refs
-    let q = colRef.orderBy("__name__").limit(batchSize);
-    if (limit > 0) {
-      const remaining = limit - deleted;
-      if (remaining <= 0) break;
-      q = colRef.orderBy("__name__").limit(Math.min(batchSize, remaining));
-    }
-
-    const snap = await q.get();
-    if (snap.empty) break;
-
-    const batch = firestore.batch();
-    snap.docs.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-
-    deleted += snap.size;
-    page += 1;
-
-    if (page % 10 === 0) {
-      console.log(`   🧹 ${collectionName}: deleted ${deleted} docs so far...`);
-    }
+  // Firestore Admin SDK requirement
+  if (typeof firestore.recursiveDelete !== "function") {
+    throw new Error("firestore.recursiveDelete is not available in this SDK version");
   }
 
-  return deleted;
+  // ----------------------------
+  // Case A: merchants/*/inventory
+  // ----------------------------
+  if (name === "merchants/*/inventory") {
+    const merchantsSnap = await firestore.collection("merchants").get();
+    console.log(`   🧹 merchants/*/inventory → ${merchantsSnap.size} merchants`);
+
+    for (const m of merchantsSnap.docs) {
+      const ref = firestore
+        .collection("merchants")
+        .doc(m.id)
+        .collection("inventory");
+
+      await firestore.recursiveDelete(ref);
+      console.log(`   ✅ deleted merchants/${m.id}/inventory`);
+    }
+
+    return;
+  }
+
+  // ----------------------------
+  // Case B: normal collection
+  // ----------------------------
+  const ref = firestore.collection(name);
+  await firestore.recursiveDelete(ref);
+  console.log(`   ✅ deleted ${name}`);
 }
 
 (async () => {
@@ -123,6 +134,8 @@ async function deleteCollection({ firestore, collectionName, batchSize = 400, li
     const CLEAN_COLLECTIONS = listEnv("CLEAN_COLLECTIONS", [
       "gtin_inventory_matrix",
       "location_index",
+      "merchants/*/inventory",
+      "inventory",
     ]);
     const CLEAN_LIMIT = intEnv("CLEAN_LIMIT", 0);
     const CLEAN_BATCH = intEnv("CLEAN_BATCH", 400);
@@ -158,8 +171,6 @@ async function deleteCollection({ firestore, collectionName, batchSize = 400, li
         const count = await deleteCollection({
           firestore,
           collectionName: col,
-          batchSize: CLEAN_BATCH,
-          limit: CLEAN_LIMIT,
         });
         results[col] = count;
         console.log(`   ✅ ${col}: deleted ${count} docs in ${((Date.now() - c0) / 1000).toFixed(1)}s`);

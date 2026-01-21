@@ -90,6 +90,8 @@
   </div>
 
   <%- include('partials/footer') %>
+  
+  <script src="/js/thumbUpload.js"></script>
 
   <script>
     const btnPrintLabels = document.getElementById('btn-print-labels');
@@ -195,6 +197,20 @@
       return (locationsMeta && locationsMeta[locKey] && locationsMeta[locKey].label)
         ? locationsMeta[locKey].label
         : locKey;
+    }
+
+    function pickBestSourceInfo(row) {
+      // Prefer a location entry that has merchant_id + item_id (needed for image upload)
+      for (const k of locationKeys) {
+        const info = row.pricesByLocation?.[k];
+        if (info?.merchant_id && info?.item_id) return { locKey: k, info };
+      }
+      // Fallback: any info at all
+      for (const k of locationKeys) {
+        const info = row.pricesByLocation?.[k];
+        if (info) return { locKey: k, info };
+      }
+      return { locKey: '', info: null };
     }
 
 
@@ -671,44 +687,24 @@
         tdDel.appendChild(delBtn);
         tr.appendChild(tdDel);
 
-        // --- image ---
-        const tdImg = document.createElement('td');
+        // --- image (shared editable thumb) ---
+        const { info: srcInfo } = pickBestSourceInfo(r);
 
-        const img = document.createElement('img');
-        img.alt = r.item_name || r.gtin || 'item';
-        img.loading = 'lazy';
-        img.style.width = '44px';
-        img.style.height = '44px';
-        img.style.objectFit = 'cover';
-        img.style.borderRadius = '8px';
-        img.style.border = '1px solid rgba(0,0,0,0.12)';
+        const tdImg = createEditableThumb({
+          imageUrl: (r.image_url || '').toString().trim(),
+          gtin: (r.gtin || '').toString().trim(),
+          merchantId: (srcInfo?.merchant_id || '').toString().trim(),
+          itemId: (srcInfo?.item_id || '').toString().trim(),
+          itemName: (srcInfo?.item_name || '').toString().trim(),
+          locationId: (srcInfo?.locationid || '').toString().trim(),
+          variationId: (srcInfo?.variation_id || '').toString().trim(),
+          onSuccess: (data) => {
+            // keep current row in sync if server returns the final CDN/url
+            if (data?.firstImageUrl) r.image_url = data.firstImageUrl;
+          }
+        });
 
-        const PLACEHOLDER =
-          'data:image/svg+xml;utf8,' +
-          encodeURIComponent(`
-            <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120">
-              <rect width="100%" height="100%" rx="14" ry="14" fill="#f3f4f6"/>
-              <path d="M28 78l18-18 14 14 12-12 20 20" fill="none" stroke="#9ca3af" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-              <circle cx="45" cy="44" r="8" fill="#9ca3af"/>
-              <text x="50%" y="92%" text-anchor="middle" font-family="Arial" font-size="14" fill="#6b7280">No Image</text>
-            </svg>
-          `);
-
-        const imgUrl = (r.image_url || '').toString().trim();
-
-        // Use API image if present, otherwise placeholder
-        img.src = imgUrl ? imgUrl : PLACEHOLDER;
-
-        // If the API image fails, fall back to placeholder
-        img.onerror = () => {
-          // Avoid infinite loop if placeholder fails (rare)
-          if (img.src === PLACEHOLDER) return;
-          img.src = PLACEHOLDER;
-        };
-
-        tdImg.appendChild(img);
         tr.appendChild(tdImg);
-
 
         const tdGtin = document.createElement('td');
         tdGtin.textContent = r.gtin;

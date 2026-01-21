@@ -103,6 +103,8 @@ app.use(buildAdminStoreAccessRouter({ firestore, requireLogin, requireAdmin }));
 // -----------------------------
 // Routers
 // -----------------------------
+app.use(require("./routes/debugSquare"));
+app.use(require("./routes/debugFirestoreInv"));
 
 // Auth (login / google / logout) + passport strategies
 app.use(require('./routes/auth')({ firestore, passport }));
